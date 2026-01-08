@@ -527,7 +527,6 @@ func highlightJSON(s string) string {
 			key = lipgloss.NewStyle().Foreground(lipgloss.Color("#874BFD")).Render(key)
 			
 			// Detect Type & Color Value
-			var badge string
 			var valColor lipgloss.Color
 			
 			val := rawVal
@@ -538,19 +537,15 @@ func highlightJSON(s string) string {
 			if strings.HasPrefix(val, "\"") {
 				// String
 				valColor = lipgloss.Color("#43BF6D") // Green
-				badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#222")).Background(lipgloss.Color("#43BF6D")).SetString(" S ").String()
 			} else if val == "true" || val == "false" {
 				// Boolean
 				valColor = lipgloss.Color("#F25D94") // Pink
-				badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#222")).Background(lipgloss.Color("#F25D94")).SetString(" B ").String()
 			} else if strings.ContainsAny(val, "0123456789") {
-				// Number (simplistic check)
+				// Number
 				valColor = lipgloss.Color("#F5C25D") // Yellow
-				badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#222")).Background(lipgloss.Color("#F5C25D")).SetString(" N ").String()
 			} else {
 				// Null or Object
 				valColor = lipgloss.Color("250")
-				badge = "   "
 			}
 			
 			renderedVal := lipgloss.NewStyle().Foreground(valColor).Render(val)
@@ -558,7 +553,7 @@ func highlightJSON(s string) string {
 				renderedVal += ","
 			}
 			
-			out = append(out, fmt.Sprintf("%s: %s %s", key, badge, renderedVal))
+			out = append(out, fmt.Sprintf("%s: %s", key, renderedVal))
 		} else {
 			out = append(out, l)
 		}
