@@ -7,8 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -79,6 +82,70 @@ const (
 	viewTableItems
 )
 
+// --- Keys ---
+
+type keyMap struct {
+	Up    key.Binding
+	Down  key.Binding
+	Enter key.Binding
+	Back  key.Binding
+	Help  key.Binding
+	Quit  key.Binding
+	Slash key.Binding
+	PgDn  key.Binding
+	PgUp  key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Enter, k.Slash, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Enter},
+		{k.Back, k.Slash, k.Help, k.Quit},
+	}
+}
+
+var keys = keyMap{
+	Up: key.NewBinding(
+		key.WithKeys("up", "k"),
+		key.WithHelp("↑/k", "move up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down", "j"),
+		key.WithHelp("↓/j", "move down"),
+	),
+	Enter: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "select"),
+	),
+	Back: key.NewBinding(
+		key.WithKeys("esc", "q"),
+		key.WithHelp("q/esc", "back"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "ctrl+c"),
+		key.WithHelp("q", "quit"),
+	),
+	Slash: key.NewBinding(
+		key.WithKeys("/"),
+		key.WithHelp("/", "command"),
+	),
+	PgDn: key.NewBinding(
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "half page down"),
+	),
+	PgUp: key.NewBinding(
+		key.WithKeys("ctrl+u"),
+		key.WithHelp("ctrl+u", "half page up"),
+	),
+}
+
 // --- Model ---
 
 type Table struct {
@@ -108,6 +175,9 @@ tableCursor int
 	spinner   spinner.Model
 	input     textinput.Model
 	inputMode bool
+	help      help.Model
+	keys      keyMap
+	viewport  viewport.Model
 }
 
 func initialModel() model {
@@ -136,6 +206,9 @@ func initialModel() model {
 
 		spinner: s,
 		input:   ti,
+		help:    help.New(),
+		keys:    keys,
+		viewport: viewport.New(0, 0),
 	}
 }
 
@@ -158,6 +231,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.Width = msg.Width - 10
+		m.viewport.Width = m.width/2 - 4
+		m.viewport.Height = m.height - 15
 
 	case loadedMsg:
 		m.loading = false
@@ -196,24 +271,52 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 
+		case "?":
+			m.help.ShowAll = !m.help.ShowAll
+
 		case "up", "k":
 			if m.view == viewTableList {
 				if m.tableCursor > 0 { m.tableCursor-- }
 			} else if m.view == viewTableItems {
-				if m.itemCursor > 0 { m.itemCursor-- }
+				if m.itemCursor > 0 { 
+					m.itemCursor--
+					m.updateViewport()
+				}
 			}
 
 		case "down", "j":
 			if m.view == viewTableList {
 				if m.tableCursor < len(m.tables)-1 { m.tableCursor++ }
 			} else if m.view == viewTableItems {
-				if m.itemCursor < len(m.mockItems)-1 { m.itemCursor++ }
+				if m.itemCursor < len(m.mockItems)-1 { 
+					m.itemCursor++ 
+					m.updateViewport()
+				}
+			}
+
+		case "ctrl+d":
+			amount := 10
+			if m.view == viewTableList {
+				m.tableCursor = min(m.tableCursor+amount, len(m.tables)-1)
+			} else if m.view == viewTableItems {
+				m.itemCursor = min(m.itemCursor+amount, len(m.mockItems)-1)
+				m.updateViewport()
+			}
+
+		case "ctrl+u":
+			amount := 10
+			if m.view == viewTableList {
+				m.tableCursor = max(m.tableCursor-amount, 0)
+			} else if m.view == viewTableItems {
+				m.itemCursor = max(m.itemCursor-amount, 0)
+				m.updateViewport()
 			}
 
 		case "enter":
 			if m.view == viewTableList {
 				m.view = viewTableItems
 				m.itemCursor = 0
+				m.updateViewport()
 			}
 		}
 	
@@ -223,7 +326,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.view == viewTableItems {
+		var vpCmd tea.Cmd
+		m.viewport, vpCmd = m.viewport.Update(msg)
+		return m, vpCmd
+	}
+
 	return m, nil
+}
+
+func (m *model) updateViewport() {
+	selectedItem := m.mockItems[m.itemCursor]
+	b, _ := json.MarshalIndent(selectedItem, "", "  ")
+	m.viewport.SetContent(highlightJSON(string(b)))
 }
 
 func (m model) View() string {
@@ -242,6 +357,9 @@ func (m model) View() string {
 		content = m.renderTableItems()
 	}
 
+	// RENDER HELP
+	helpView := m.help.View(m.keys)
+
 	// ALWAYS RENDER COMMAND BAR
 	cmdBar := m.input.View()
 	if !m.inputMode {
@@ -250,14 +368,14 @@ func (m model) View() string {
 	cmdBarBox := inputStyle.Width(m.width - 2).Render(cmdBar)
 
 	// Calculate Gap to push bar to bottom
-	contentHeight := lipgloss.Height(content) + lipgloss.Height(cmdBarBox)
+	contentHeight := lipgloss.Height(content) + lipgloss.Height(helpView) + lipgloss.Height(cmdBarBox) + 1
 	gapH := m.height - contentHeight
 	gap := ""
 	if gapH > 0 {
 		gap = strings.Repeat("\n", gapH)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, content, gap, cmdBarBox)
+	return lipgloss.JoinVertical(lipgloss.Left, content, gap, "  "+helpView, cmdBarBox)
 }
 
 func (m model) renderTableList() string {
@@ -318,7 +436,7 @@ func (m model) renderTableItems() string {
 	)
 
 	// Windowing Logic
-	availableHeight := m.height - 10 
+	availableHeight := m.height - 15 
 	if availableHeight < 1 { availableHeight = 1 }
 	
 	start := 0
@@ -361,18 +479,6 @@ func (m model) renderTableItems() string {
 
 
 	// --- RIGHT PANE: JSON Inspector ---
-	selectedItem := m.mockItems[m.itemCursor]
-	
-	// Pretty Print JSON
-	b, _ := json.MarshalIndent(selectedItem, "", "  ")
-	jsonStr := string(b)
-	
-	// Highlight
-	jsonStr = highlightJSON(jsonStr)
-
-	detailContent := lipgloss.NewStyle().
-		Render(jsonStr)
-		
 	detailBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(subtle).
@@ -381,7 +487,7 @@ func (m model) renderTableItems() string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, 
 			lipgloss.NewStyle().Foreground(accent).Bold(true).Render("ITEM JSON"), 
 			"\n",
-			detailContent,
+			m.viewport.View(),
 		))
 
 	// --- COMBINE ---
