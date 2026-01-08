@@ -178,6 +178,7 @@ tableCursor int
 	help      help.Model
 	keys      keyMap
 	viewport  viewport.Model
+	activePane int
 }
 
 func initialModel() model {
@@ -267,9 +268,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q":
 			if m.view == viewTableItems {
 				m.view = viewTableList
+				m.activePane = 0
 				return m, nil
 			}
 			return m, tea.Quit
+
+		case "l", "right":
+			if m.view == viewTableItems {
+				m.activePane = 1
+			}
+		case "h", "left":
+			if m.view == viewTableItems {
+				m.activePane = 0
+			}
 
 		case "?":
 			m.help.ShowAll = !m.help.ShowAll
@@ -278,9 +289,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewTableList {
 				if m.tableCursor > 0 { m.tableCursor-- }
 			} else if m.view == viewTableItems {
-				if m.itemCursor > 0 { 
-					m.itemCursor--
-					m.updateViewport()
+				if m.activePane == 0 {
+					if m.itemCursor > 0 { 
+						m.itemCursor--
+						m.updateViewport()
+					}
+				} else {
+					m.viewport.LineUp(1)
 				}
 			}
 
@@ -288,9 +303,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewTableList {
 				if m.tableCursor < len(m.tables)-1 { m.tableCursor++ }
 			} else if m.view == viewTableItems {
-				if m.itemCursor < len(m.mockItems)-1 { 
-					m.itemCursor++ 
-					m.updateViewport()
+				if m.activePane == 0 {
+					if m.itemCursor < len(m.mockItems)-1 { 
+						m.itemCursor++ 
+						m.updateViewport()
+					}
+				} else {
+					m.viewport.LineDown(1)
 				}
 			}
 
@@ -299,8 +318,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewTableList {
 				m.tableCursor = min(m.tableCursor+amount, len(m.tables)-1)
 			} else if m.view == viewTableItems {
-				m.itemCursor = min(m.itemCursor+amount, len(m.mockItems)-1)
-				m.updateViewport()
+				if m.activePane == 0 {
+					m.itemCursor = min(m.itemCursor+amount, len(m.mockItems)-1)
+					m.updateViewport()
+				} else {
+					m.viewport.HalfViewDown()
+				}
 			}
 
 		case "ctrl+u":
@@ -308,8 +331,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewTableList {
 				m.tableCursor = max(m.tableCursor-amount, 0)
 			} else if m.view == viewTableItems {
-				m.itemCursor = max(m.itemCursor-amount, 0)
-				m.updateViewport()
+				if m.activePane == 0 {
+					m.itemCursor = max(m.itemCursor-amount, 0)
+					m.updateViewport()
+				} else {
+					m.viewport.HalfViewUp()
+				}
 			}
 
 		case "enter", " ":
@@ -317,6 +344,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = viewTableItems
 				m.itemCursor = 0
 				m.updateViewport()
+			} else if m.view == viewTableItems {
+				m.activePane = 1
 			}
 		}
 	
@@ -497,9 +526,14 @@ func (m model) renderTableItems() string {
 
 
 	// --- RIGHT PANE: JSON Inspector ---
+	detailBorderColor := subtle
+	if m.activePane == 1 {
+		detailBorderColor = highlight
+	}
+
 	detailBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(subtle).
+		BorderForeground(detailBorderColor).
 		Width(rightWidth).
 		Padding(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, 
