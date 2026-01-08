@@ -158,7 +158,7 @@ type Table struct {
 	Status    string
 }
 
-type Item map[string]string
+type Item map[string]interface{}
 
 type model struct {
 	view      currentView
@@ -399,17 +399,34 @@ func (m model) renderTableList() string {
 
 	rightWidth := m.width - leftWidth - 4
 	selected := m.tables[m.tableCursor]
-	kv := func(k, v string) string {
-		return lipgloss.JoinHorizontal(lipgloss.Left, labelStyle.Render(k), valueStyle.Render(v))
+
+	// Schema Map Visualizer
+	tree := fmt.Sprintf("Table: %s\n", selected.Name)
+	tree += fmt.Sprintf("├── PK: %s (S)\n", selected.PK)
+	tree += fmt.Sprintf("└── SK: %s (S)\n", selected.SK)
+	
+	if len(selected.GSIs) > 0 {
+		tree += "\nIndexes:\n"
+		for i, idx := range selected.GSIs {
+			isLast := i == len(selected.GSIs)-1
+			prefix := "├──"
+			if isLast { prefix = "└──" }
+			tree += fmt.Sprintf("%s %s\n", prefix, idx)
+			
+			// Sub-tree for index keys
+			subPrefix := "│   "
+			if isLast { subPrefix = "    " }
+			tree += fmt.Sprintf("%s├── PK: %s_pk\n", subPrefix, idx)
+			tree += fmt.Sprintf("%s└── SK: %s_sk\n", subPrefix, idx)
+		}
+	} else {
+		tree += "\n(No Indexes)"
 	}
+
 	details := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Render("Table Details"), "",
-		kv("Name:", selected.Name),
-		kv("Status:", selected.Status),
-		kv("Items:", fmt.Sprintf("%d", selected.ItemCount)),
-		kv("PK:", selected.PK),
-		kv("SK:", selected.SK),
-		kv("Region:", selected.Region),
+		lipgloss.NewStyle().Bold(true).Foreground(accent).Render("SCHEMA MAP"),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(tree),
 	)
 	rightPane := detailStyle.Width(rightWidth).Height(15).Render(details)
 
@@ -458,7 +475,8 @@ func (m model) renderTableItems() string {
 	var rows []string
 	for i := start; i < end; i++ {
 		item := m.mockItems[i]
-		pk, sk := item["pk"], item["sk"]
+		pk := fmt.Sprintf("%v", item["pk"])
+		sk := fmt.Sprintf("%v", item["sk"])
 		
 		style := itemRowStyle
 		if m.itemCursor == i {
@@ -503,14 +521,44 @@ func highlightJSON(s string) string {
 		if strings.Contains(l, "\":") {
 			parts := strings.SplitN(l, ":", 2)
 			key := parts[0]
-			val := parts[1]
+			rawVal := strings.TrimSpace(parts[1])
 			
 			// Color Key (Purple)
 			key = lipgloss.NewStyle().Foreground(lipgloss.Color("#874BFD")).Render(key)
-			// Color Value (Green)
-			val = lipgloss.NewStyle().Foreground(lipgloss.Color("#43BF6D")).Render(val)
 			
-			out = append(out, key+":"+val)
+			// Detect Type & Color Value
+			var badge string
+			var valColor lipgloss.Color
+			
+			val := rawVal
+			if strings.HasSuffix(val, ",") {
+				val = strings.TrimSuffix(val, ",")
+			}
+
+			if strings.HasPrefix(val, "\"") {
+				// String
+				valColor = lipgloss.Color("#43BF6D") // Green
+				badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#222")).Background(lipgloss.Color("#43BF6D")).SetString(" S ").String()
+			} else if val == "true" || val == "false" {
+				// Boolean
+				valColor = lipgloss.Color("#F25D94") // Pink
+				badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#222")).Background(lipgloss.Color("#F25D94")).SetString(" B ").String()
+			} else if strings.ContainsAny(val, "0123456789") {
+				// Number (simplistic check)
+				valColor = lipgloss.Color("#F5C25D") // Yellow
+				badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#222")).Background(lipgloss.Color("#F5C25D")).SetString(" N ").String()
+			} else {
+				// Null or Object
+				valColor = lipgloss.Color("250")
+				badge = "   "
+			}
+			
+			renderedVal := lipgloss.NewStyle().Foreground(valColor).Render(val)
+			if strings.HasSuffix(rawVal, ",") {
+				renderedVal += ","
+			}
+			
+			out = append(out, fmt.Sprintf("%s: %s %s", key, badge, renderedVal))
 		} else {
 			out = append(out, l)
 		}
@@ -521,14 +569,22 @@ func generateMockData(n int) []Item {
 	var items []Item
 	for i := 0; i < n; i++ {
 		items = append(items, Item{
-			"pk": fmt.Sprintf("USER#%03d", i+1),
-			"sk": "PROFILE",
-			"name": fmt.Sprintf("User %d", i+1),
-			"email": fmt.Sprintf("user%d@example.com", i+1),
-			"address": fmt.Sprintf("%d Random St, City %d", i*5, i),
-			"preferences": fmt.Sprintf(`{"theme":"dark","notifications":%t}`, i%2==0),
-			"history": fmt.Sprintf(`["login","logout","purchase","view"]`),
-			"metadata": fmt.Sprintf(`{"created_at":"2023-01-%02d","active":true}`, (i%30)+1),
+			"pk":          fmt.Sprintf("USER#%03d", i+1),
+			"sk":          "PROFILE",
+			"name":        fmt.Sprintf("User %d", i+1),
+			"age":         20 + (i % 50),
+			"is_active":   i%3 != 0,
+			"rating":      float64(i%50) / 10.0 + 1.5,
+			"roles":       []string{"user", "editor"},
+			"settings": map[string]interface{}{
+				"theme": "dark",
+				"notifications": map[string]bool{
+					"email": true,
+					"push":  false,
+				},
+			},
+			"notes":       "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
+			"last_login":  nil,
 		})
 	}
 	return items
