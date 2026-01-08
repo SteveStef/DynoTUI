@@ -312,8 +312,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateViewport()
 			}
 
-		case "enter":
-			if m.view == viewTableList {
+		case "enter", " ":
+			if m.view == viewTableList && msg.String() == "enter" {
 				m.view = viewTableItems
 				m.itemCursor = 0
 				m.updateViewport()
