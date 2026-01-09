@@ -98,6 +98,7 @@ type keyMap struct {
 	Slash key.Binding
 	PgDn  key.Binding
 	PgUp  key.Binding
+	Edit  key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -107,7 +108,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter},
-		{k.Back, k.Slash, k.Help, k.Quit},
+		{k.Back, k.Slash, k.Help, k.Quit, k.Edit},
 	}
 }
 
@@ -147,6 +148,10 @@ var keys = keyMap{
 	PgUp: key.NewBinding(
 		key.WithKeys("ctrl+u"),
 		key.WithHelp("ctrl+u", "half page up"),
+	),
+	Edit: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit item"),
 	),
 }
 
@@ -213,6 +218,10 @@ func initialModel() model {
 
 type tablesLoadedMsg []TableDetails // Using the struct from aws.go
 type itemsLoadedMsg []map[string]interface{}
+type editorFinishedMsg struct {
+	newItem Item
+	err     error
+}
 type errMsg error
 
 // --- Commands ---
@@ -308,6 +317,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.itemCursor = 0
 		m.activePane = 0
 		m.updateViewport()
+		return m, nil
+
+	case editorFinishedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.view = viewError
+		} else if msg.newItem != nil {
+			m.items[m.itemCursor] = msg.newItem
+			m.updateViewport()
+		}
 		return m, nil
 
 	case errMsg:
@@ -437,6 +456,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.view == viewTableItems {
 				m.activePane = 1
+			}
+
+		case "e", "E":
+			log.Printf("Edit key pressed. View: %v, Items: %d", m.view, len(m.items))
+			if m.view == viewTableItems && len(m.items) > 0 {
+				log.Println("Opening editor...")
+				return m, openEditor(m.items[m.itemCursor])
 			}
 		}
 
