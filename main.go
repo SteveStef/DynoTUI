@@ -111,6 +111,7 @@ type keyMap struct {
 	PgUp  key.Binding
 	Edit  key.Binding
 	Save  key.Binding
+	Add   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -120,7 +121,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter},
-		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save},
+		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save, k.Add},
 	}
 }
 
@@ -168,6 +169,10 @@ var keys = keyMap{
 	Save: key.NewBinding(
 		key.WithKeys("s"),
 		key.WithHelp("s", "save item"),
+	),
+	Add: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "add item"),
 	),
 }
 
@@ -239,6 +244,7 @@ type itemsLoadedMsg []map[string]interface{}
 type editorFinishedMsg struct {
 	newItem Item
 	err     error
+	isNew   bool
 }
 type itemSavedMsg struct{ err error }
 type errMsg error
@@ -354,9 +360,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.view = viewError
 		} else if msg.newItem != nil {
-			m.items[m.itemCursor] = msg.newItem
-			m.modifiedItems[m.itemCursor] = true
-			m.updateViewport()
+			if msg.isNew {
+				m.items = append(m.items, msg.newItem)
+				m.itemCursor = len(m.items) - 1
+				m.modifiedItems[m.itemCursor] = true
+				m.updateViewport()
+			} else {
+				m.items[m.itemCursor] = msg.newItem
+				m.modifiedItems[m.itemCursor] = true
+				m.updateViewport()
+			}
 		}
 		return m, nil
 
@@ -366,8 +379,72 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.view = viewError
 		} else {
-			// Success! Clear modified flag.
+			// Success! Clear modified flag for the saved item
 			delete(m.modifiedItems, m.itemCursor)
+
+			// Deduplicate: Remove OTHER items with the same PK/SK
+			savedItem := m.items[m.itemCursor]
+			currentTable := m.tables[m.tableCursor]
+
+			// Helper to get key value
+			getKeyVal := func(itm Item, key string) interface{} {
+				if val, ok := itm[key]; ok {
+					return val
+				}
+				return nil
+			}
+
+			pkVal := getKeyVal(savedItem, currentTable.PK)
+			skVal := getKeyVal(savedItem, currentTable.SK)
+
+			var newItems []Item
+			// We need to rebuild modifiedItems because indices will shift
+			newModifiedItems := make(map[int]bool)
+			
+			// We track the new index of the current cursor
+			newCursor := m.itemCursor
+			
+			// Source index vs Destination index
+			dstIdx := 0
+			
+			for srcIdx, item := range m.items {
+				if srcIdx == m.itemCursor {
+					// Always keep the item we just saved
+					newItems = append(newItems, item)
+					// If it was modified (it shouldn't be now), we'd map it.
+					// newCursor tracks where this lands
+					newCursor = dstIdx
+					dstIdx++
+					continue
+				}
+
+				// Check for key match
+				itemPK := getKeyVal(item, currentTable.PK)
+				match := (itemPK == pkVal)
+				
+				if match && currentTable.SK != "" {
+					itemSK := getKeyVal(item, currentTable.SK)
+					match = (itemSK == skVal)
+				}
+
+				if match {
+					// Duplicate found! Skip it.
+					// Do NOT increment dstIdx.
+				} else {
+					// Keep this item
+					newItems = append(newItems, item)
+					// Preserve modified status
+					if m.modifiedItems[srcIdx] {
+						newModifiedItems[dstIdx] = true
+					}
+					dstIdx++
+				}
+			}
+
+			m.items = newItems
+			m.modifiedItems = newModifiedItems
+			m.itemCursor = newCursor
+
 			m.view = viewTableItems
 			m.updateViewport()
 		}
@@ -521,7 +598,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			log.Printf("Edit key pressed. View: %v, Items: %d", m.view, len(m.items))
 			if m.view == viewTableItems && len(m.items) > 0 {
 				log.Println("Opening editor...")
-				return m, openEditor(m.items[m.itemCursor])
+				return m, openEditor(m.items[m.itemCursor], false)
+			}
+
+		case "a", "A":
+			if m.view == viewTableItems {
+				return m, openEditor(nil, true)
 			}
 
 		case "s", "S":

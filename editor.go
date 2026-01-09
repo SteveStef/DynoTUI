@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func openEditor(item Item) tea.Cmd {
+func openEditor(item Item, isNew bool) tea.Cmd {
 	// Create temp file
 	f, err := os.CreateTemp("", "dynotui-*.json")
 	if err != nil {
@@ -16,6 +16,10 @@ func openEditor(item Item) tea.Cmd {
 	}
 	// We verify the file closes after we write to it, so vim can open it independently
 	defer f.Close()
+
+	if item == nil {
+		item = make(Item)
+	}
 
 	// Marshal item to JSON
 	b, err := json.MarshalIndent(item, "", "  ")
@@ -67,6 +71,6 @@ func openEditor(item Item) tea.Cmd {
 			return editorFinishedMsg{err: jsonErr}
 		}
 
-		return editorFinishedMsg{newItem: newItem}
+		return editorFinishedMsg{newItem: newItem, isNew: isNew}
 	})
 }
