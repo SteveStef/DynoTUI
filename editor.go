@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"reflect"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -69,6 +70,15 @@ func openEditor(item Item, isNew bool) tea.Cmd {
 		var newItem Item
 		if jsonErr := json.Unmarshal(content, &newItem); jsonErr != nil {
 			return editorFinishedMsg{err: jsonErr}
+		}
+
+		// Check if modified (unless it's new, then it's always "modified" in the sense that it's a new entry)
+		// But wait, if I add a new item and don't change {}, is it modified? Yes, it's a new pending item.
+		// So we only check equality if !isNew.
+		
+		if !isNew && reflect.DeepEqual(item, newItem) {
+			// No changes made
+			return editorFinishedMsg{newItem: nil} 
 		}
 
 		return editorFinishedMsg{newItem: newItem, isNew: isNew}
