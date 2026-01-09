@@ -95,6 +95,7 @@ const (
 	viewTableItems
 	viewError
 	viewConfirmation
+	viewDeleteConfirmation
 )
 
 // --- Keys ---
@@ -112,6 +113,7 @@ type keyMap struct {
 	Edit  key.Binding
 	Save  key.Binding
 	Add   key.Binding
+	Delete key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -121,7 +123,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter},
-		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save, k.Add},
+		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save, k.Add, k.Delete},
 	}
 }
 
@@ -173,6 +175,10 @@ var keys = keyMap{
 	Add: key.NewBinding(
 		key.WithKeys("a"),
 		key.WithHelp("a", "add item"),
+	),
+	Delete: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "delete item"),
 	),
 }
 
@@ -247,12 +253,10 @@ type editorFinishedMsg struct {
 	isNew   bool
 }
 type itemSavedMsg struct{ err error }
+type itemDeletedMsg struct{ err error }
 type errMsg error
 
 // --- Commands ---
-
-
-
 
 
 func loadTables() tea.Msg {
@@ -307,6 +311,27 @@ func saveItemCmd(tableName string, item Item) tea.Cmd {
 
 		err := PutItem(ctx, "us-east-1", tableName, item)
 		return itemSavedMsg{err}
+	}
+}
+
+func deleteItemCmd(tableName string, item Item, pkName, skName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Construct Key Map
+		keyMap := make(map[string]interface{})
+		if val, ok := item[pkName]; ok {
+			keyMap[pkName] = val
+		}
+		if skName != "" {
+			if val, ok := item[skName]; ok {
+				keyMap[skName] = val
+			}
+		}
+
+		err := DeleteItem(ctx, "us-east-1", tableName, keyMap)
+		return itemDeletedMsg{err}
 	}
 }
 
@@ -450,6 +475,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case itemDeletedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.view = viewError
+		} else {
+			// Remove the item from the list
+			if len(m.items) > 0 {
+				m.items = append(m.items[:m.itemCursor], m.items[m.itemCursor+1:]...)
+				// Adjust cursor if necessary
+				if m.itemCursor >= len(m.items) && m.itemCursor > 0 {
+					m.itemCursor--
+				}
+				// Also clear/rebuild modifiedItems map (simplification: clear it or we have to shift)
+				// For simplicity, we'll clear the modified flag for the deleted index, 
+				// but strictly we should shift keys > cursor down by 1.
+				// Let's rebuild it properly.
+				newModified := make(map[int]bool)
+				for k, v := range m.modifiedItems {
+					if k < m.itemCursor {
+						newModified[k] = v
+					} else if k > m.itemCursor {
+						newModified[k-1] = v
+					}
+				}
+				m.modifiedItems = newModified
+			}
+			m.view = viewTableItems
+			m.updateViewport()
+		}
+		return m, nil
+
 	case errMsg:
 		m.err = msg
 		m.loading = false
@@ -471,6 +528,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = viewLoading
 				m.statusMessage = "Saving item to DynamoDB..."
 				return m, saveItemCmd(m.tables[m.tableCursor].Name, m.items[m.itemCursor])
+			case "n", "N", "esc":
+				m.view = viewTableItems
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+
+		if m.view == viewDeleteConfirmation {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				m.loading = true
+				m.view = viewLoading
+				m.statusMessage = "Deleting item from DynamoDB..."
+				t := m.tables[m.tableCursor]
+				return m, deleteItemCmd(t.Name, m.items[m.itemCursor], t.PK, t.SK)
 			case "n", "N", "esc":
 				m.view = viewTableItems
 				return m, nil
@@ -611,6 +684,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = viewConfirmation
 				return m, nil
 			}
+
+		case "d", "D":
+			if m.view == viewTableItems && len(m.items) > 0 {
+				m.view = viewDeleteConfirmation
+				return m, nil
+			}
 		}
 
 	case spinner.TickMsg:
@@ -655,6 +734,22 @@ func (m model) View() string {
 	case viewConfirmation:
 		question := lipgloss.NewStyle().Bold(true).Render("Are you sure you want to save this item to DynamoDB?")
 		warning := lipgloss.NewStyle().Foreground(warning).Render("This will overwrite the existing item.")
+		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to confirm, n/esc to cancel)")
+		
+		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+			dialogBoxStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Center,
+					question,
+					"",
+					warning,
+					"",
+					controls,
+				),
+			),
+		)
+	case viewDeleteConfirmation:
+		question := lipgloss.NewStyle().Bold(true).Render("Are you sure you want to DELETE this item?")
+		warning := lipgloss.NewStyle().Foreground(warning).Render("This action cannot be undone.")
 		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to confirm, n/esc to cancel)")
 		
 		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,

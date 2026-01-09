@@ -185,4 +185,30 @@ func PutItem(ctx context.Context, region string, tableName string, item map[stri
 	return nil
 }
 
+// DeleteItem deletes an item from DynamoDB
+func DeleteItem(ctx context.Context, region string, tableName string, key map[string]interface{}) error {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return fmt.Errorf("load aws config: %w", err)
+	}
+
+	client := dynamodb.NewFromConfig(cfg)
+
+	// Marshal Go map to DynamoDB AttributeValue map for key
+	av, err := attributevalue.MarshalMap(key)
+	if err != nil {
+		return fmt.Errorf("marshal key: %w", err)
+	}
+
+	_, err = client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: aws.String(tableName),
+		Key:       av,
+	})
+	if err != nil {
+		return fmt.Errorf("delete item: %w", err)
+	}
+
+	return nil
+}
+
 
