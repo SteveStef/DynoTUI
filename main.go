@@ -73,6 +73,16 @@ var (
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(highlight).
 		Padding(0, 1)
+
+	// Dialog
+	dialogBoxStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(warning).
+		Padding(1, 0).
+		BorderTop(true).
+		BorderLeft(true).
+		BorderRight(true).
+		BorderBottom(true)
 )
 
 // --- Enums ---
@@ -84,6 +94,7 @@ const (
 	viewTableList
 	viewTableItems
 	viewError
+	viewConfirmation
 )
 
 // --- Keys ---
@@ -99,6 +110,7 @@ type keyMap struct {
 	PgDn  key.Binding
 	PgUp  key.Binding
 	Edit  key.Binding
+	Save  key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -108,7 +120,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter},
-		{k.Back, k.Slash, k.Help, k.Quit, k.Edit},
+		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save},
 	}
 }
 
@@ -153,6 +165,10 @@ var keys = keyMap{
 		key.WithKeys("e"),
 		key.WithHelp("e", "edit item"),
 	),
+	Save: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "save item"),
+	),
 }
 
 // --- Model ---
@@ -178,6 +194,7 @@ type model struct {
 	items       []Item
 	tableCursor int
 	itemCursor  int
+	modifiedItems map[int]bool
 	spinner     spinner.Model
 	input       textinput.Model
 	inputMode   bool
@@ -205,6 +222,7 @@ func initialModel() model {
 		loading:       true,
 		tables:        []Table{},
 		items:         []Item{},
+		modifiedItems: make(map[int]bool),
 		spinner:       s,
 		input:         ti,
 		help:          help.New(),
@@ -222,6 +240,7 @@ type editorFinishedMsg struct {
 	newItem Item
 	err     error
 }
+type itemSavedMsg struct{ err error }
 type errMsg error
 
 // --- Commands ---
@@ -275,6 +294,16 @@ func scanTable(name string) tea.Cmd {
 	}
 }
 
+func saveItemCmd(tableName string, item Item) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err := PutItem(ctx, "us-east-1", tableName, item)
+		return itemSavedMsg{err}
+	}
+}
+
 func (m *model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, func() tea.Msg { return loadTables() })
 }
@@ -314,6 +343,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newItems[i] = Item(item)
 		}
 		m.items = newItems
+		m.modifiedItems = make(map[int]bool)
 		m.itemCursor = 0
 		m.activePane = 0
 		m.updateViewport()
@@ -325,6 +355,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewError
 		} else if msg.newItem != nil {
 			m.items[m.itemCursor] = msg.newItem
+			m.modifiedItems[m.itemCursor] = true
+			m.updateViewport()
+		}
+		return m, nil
+
+	case itemSavedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.view = viewError
+		} else {
+			// Success! Clear modified flag.
+			delete(m.modifiedItems, m.itemCursor)
+			m.view = viewTableItems
 			m.updateViewport()
 		}
 		return m, nil
@@ -341,6 +385,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewTableList
 			m.err = nil
 			return m, nil
+		}
+
+		if m.view == viewConfirmation {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				m.loading = true
+				m.view = viewLoading
+				m.statusMessage = "Saving item to DynamoDB..."
+				return m, saveItemCmd(m.tables[m.tableCursor].Name, m.items[m.itemCursor])
+			case "n", "N", "esc":
+				m.view = viewTableItems
+				return m, nil
+			default:
+				return m, nil
+			}
 		}
 
 		if !m.inputMode && msg.String() == "ctrl+c" {
@@ -464,6 +523,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Println("Opening editor...")
 				return m, openEditor(m.items[m.itemCursor])
 			}
+
+		case "s", "S":
+			if m.view == viewTableItems && len(m.items) > 0 {
+				m.view = viewConfirmation
+				return m, nil
+			}
 		}
 
 	case spinner.TickMsg:
@@ -505,6 +570,22 @@ func (m model) View() string {
 		content = m.renderTableList()
 	case viewTableItems:
 		content = m.renderTableItems()
+	case viewConfirmation:
+		question := lipgloss.NewStyle().Bold(true).Render("Are you sure you want to save this item to DynamoDB?")
+		warning := lipgloss.NewStyle().Foreground(warning).Render("This will overwrite the existing item.")
+		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to confirm, n/esc to cancel)")
+		
+		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+			dialogBoxStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Center,
+					question,
+					"",
+					warning,
+					"",
+					controls,
+				),
+			),
+		)
 	case viewError:
 		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center,
@@ -654,6 +735,12 @@ func (m model) renderTableItems() string {
 		sort.Strings(keys) // Consistent order
 		
 		summary := ""
+		
+		// Add modification indicator
+		if m.modifiedItems[i] {
+			summary += "[+] "
+		}
+
 		if len(keys) > 0 { summary += fmt.Sprintf("%s=%v ", keys[0], item[keys[0]]) }
 		if len(keys) > 1 { summary += fmt.Sprintf("%s=%v", keys[1], item[keys[1]]) }
 		if summary == "" { summary = "{empty}" }
@@ -682,6 +769,11 @@ func (m model) renderTableItems() string {
 	if m.activePane == 1 {
 		detailBorderColor = highlight
 	}
+	
+	detailTitle := "ITEM JSON"
+	if m.modifiedItems[m.itemCursor] {
+		detailTitle = "ITEM JSON (MODIFIED - Not Synced)"
+	}
 
 	detailBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -689,7 +781,7 @@ func (m model) renderTableItems() string {
 		Width(rightWidth).
 		Padding(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, 
-			lipgloss.NewStyle().Foreground(accent).Bold(true).Render("ITEM JSON"), 
+			lipgloss.NewStyle().Foreground(accent).Bold(true).Render(detailTitle), 
 			"\n",
 			m.viewport.View(),
 		))

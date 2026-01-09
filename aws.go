@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
@@ -141,7 +142,12 @@ func ScanTable(ctx context.Context, region string, tableName string) ([]map[stri
 		}
 		
 		for _, item := range page.Items {
-			items = append(items, unmarshalItem(item))
+			var unmarshalledItem map[string]interface{}
+			if err := attributevalue.UnmarshalMap(item, &unmarshalledItem); err != nil {
+				// Log error or skip? For now, we'll try to continue
+				continue 
+			}
+			items = append(items, unmarshalledItem)
 		}
 
 		// Safety break for development: limit to 1000 items
@@ -153,43 +159,30 @@ func ScanTable(ctx context.Context, region string, tableName string) ([]map[stri
 	return items, nil
 }
 
-// unmarshalAttributeValue converts DynamoDB AttributeValue to native Go types
-func unmarshalAttributeValue(av types.AttributeValue) interface{} {
-	switch v := av.(type) {
-	case *types.AttributeValueMemberS:
-		return v.Value
-	case *types.AttributeValueMemberN:
-		return v.Value // Returns string representation of number
-	case *types.AttributeValueMemberBOOL:
-		return v.Value
-	case *types.AttributeValueMemberM:
-		// Recursive for Maps
-		out := make(map[string]interface{})
-		for k, val := range v.Value {
-			out[k] = unmarshalAttributeValue(val)
-		}
-		return out
-	case *types.AttributeValueMemberL:
-		// Recursive for Lists
-		var out []interface{}
-		for _, val := range v.Value {
-			out = append(out, unmarshalAttributeValue(val))
-		}
-		return out
-	case *types.AttributeValueMemberNULL:
-		return nil
-	default:
-		return nil
+// PutItem uploads an item to DynamoDB (Update/Insert)
+func PutItem(ctx context.Context, region string, tableName string, item map[string]interface{}) error {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return fmt.Errorf("load aws config: %w", err)
 	}
-}
 
-// Helper to convert the whole item map
-func unmarshalItem(item map[string]types.AttributeValue) map[string]interface{} {
-	out := make(map[string]interface{})
-	for k, v := range item {
-		out[k] = unmarshalAttributeValue(v)
+	client := dynamodb.NewFromConfig(cfg)
+
+	// Marshal Go map to DynamoDB AttributeValue map
+	av, err := attributevalue.MarshalMap(item)
+	if err != nil {
+		return fmt.Errorf("marshal item: %w", err)
 	}
-	return out
+
+	_, err = client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(tableName),
+		Item:      av,
+	})
+	if err != nil {
+		return fmt.Errorf("put item: %w", err)
+	}
+
+	return nil
 }
 
 
