@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -80,6 +83,7 @@ const (
 	viewLoading currentView = iota
 	viewTableList
 	viewTableItems
+	viewError
 )
 
 // --- Keys ---
@@ -153,7 +157,7 @@ type Table struct {
 	PK        string
 	SK        string
 	Region    string
-	ItemCount int
+	ItemCount int64
 	GSIs      []string
 	Status    string
 }
@@ -161,24 +165,23 @@ type Table struct {
 type Item map[string]interface{}
 
 type model struct {
-	view      currentView
-	width     int
-	height    int
-	loading   bool
-	
-tables    []Table
-	mockItems []Item
-	
-tableCursor int
+	view        currentView
+	width       int
+	height      int
+	loading     bool
+	tables      []Table
+	items       []Item
+	tableCursor int
 	itemCursor  int
-	
-	spinner   spinner.Model
-	input     textinput.Model
-	inputMode bool
-	help      help.Model
-	keys      keyMap
-	viewport  viewport.Model
-	activePane int
+	spinner     spinner.Model
+	input       textinput.Model
+	inputMode   bool
+	help        help.Model
+	keys        keyMap
+	viewport    viewport.Model
+	activePane  int
+	statusMessage string
+	err         error
 }
 
 func initialModel() model {
@@ -187,45 +190,87 @@ func initialModel() model {
 	s.Style = lipgloss.NewStyle().Foreground(highlight)
 
 	ti := textinput.New()
-	ti.Placeholder = "Type a command (e.g. 'seed 50 users')..."
+	ti.Placeholder = "Type a command..."
 	ti.Prompt = "❯ "
 	ti.CharLimit = 156
 	ti.Width = 50
 
 	return model{
-		view:    viewLoading,
-		loading: true,
-		
-		tables: []Table{
-			{"Users", "user_id", "metadata", "us-east-1", 1250, []string{"email-index"}, "ACTIVE"},
-			{"Orders", "order_id", "timestamp", "us-east-1", 45000, []string{"customer-date"}, "ACTIVE"},
-			{"Products", "sku", "category", "us-west-2", 300, []string{}, "ACTIVE"},
-			{"Inventory", "warehouse_id", "sku", "us-east-1", 12, []string{"sku-index"}, "UPDATING"},
-		},
-		
-		mockItems: generateMockData(50),
-
-		spinner: s,
-		input:   ti,
-		help:    help.New(),
-		keys:    keys,
-		viewport: viewport.New(0, 0),
+		view:          viewLoading,
+		loading:       true,
+		tables:        []Table{},
+		items:         []Item{},
+		spinner:       s,
+		input:         ti,
+		help:          help.New(),
+		keys:          keys,
+		viewport:      viewport.New(0, 0),
+		statusMessage: "Loading tables from AWS...",
 	}
 }
 
-type loadedMsg struct {}
+// --- Messages ---
 
-func loadData() tea.Cmd {
-	return tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
-		return loadedMsg{}
-	})
+type tablesLoadedMsg []TableDetails // Using the struct from aws.go
+type itemsLoadedMsg []map[string]interface{}
+type errMsg error
+
+// --- Commands ---
+
+
+
+
+
+func loadTables() tea.Msg {
+
+	log.Println("Starting loadTables...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	defer cancel()
+
+
+
+	log.Println("Calling ListTablesWithDetails...")
+
+	// Region is hardcoded for now, mimicking original aws.go logic.
+
+	tables, err := ListTablesWithDetails(ctx, "us-east-1")
+
+	if err != nil {
+
+		log.Printf("ListTablesWithDetails failed: %v", err)
+
+		return errMsg(err)
+
+	}
+
+	log.Printf("Successfully loaded %d tables", len(tables))
+
+	return tablesLoadedMsg(tables)
+
 }
 
-func (m model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, loadData())
+
+
+func scanTable(name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		items, err := ScanTable(ctx, "us-east-1", name)
+		if err != nil {
+			return errMsg(err)
+		}
+		return itemsLoadedMsg(items)
+	}
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Init() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, func() tea.Msg { return loadTables() })
+}
+
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -235,12 +280,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = m.width/2 - 4
 		m.viewport.Height = m.height - 15
 
-	case loadedMsg:
+	case tablesLoadedMsg:
 		m.loading = false
 		m.view = viewTableList
+		m.tables = make([]Table, len(msg))
+		for i, t := range msg {
+			m.tables[i] = Table{
+				Name:      t.Name,
+				PK:        t.PK,
+				SK:        t.SK,
+				Region:    t.Region,
+				ItemCount: t.ItemCount,
+				GSIs:      t.GSIs,
+				Status:    t.Status,
+			}
+		}
+		return m, nil
+
+	case itemsLoadedMsg:
+		m.loading = false
+		m.view = viewTableItems
+		newItems := make([]Item, len(msg))
+		for i, item := range msg {
+			newItems[i] = Item(item)
+		}
+		m.items = newItems
+		m.itemCursor = 0
+		m.activePane = 0
+		m.updateViewport()
+		return m, nil
+
+	case errMsg:
+		m.err = msg
+		m.loading = false
+		m.view = viewError
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.view == viewError {
+			// Allow any key to go back
+			m.view = viewTableList
+			m.err = nil
+			return m, nil
+		}
+
 		if !m.inputMode && msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -250,7 +333,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Focus()
 			return m, textinput.Blink
 		}
-		
+
 		if m.inputMode {
 			switch msg.String() {
 			case "enter", "esc":
@@ -268,6 +351,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q":
 			if m.view == viewTableItems {
 				m.view = viewTableList
+				m.items = []Item{} // Clear items to save memory
 				m.activePane = 0
 				return m, nil
 			}
@@ -287,10 +371,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "up", "k":
 			if m.view == viewTableList {
-				if m.tableCursor > 0 { m.tableCursor-- }
+				if m.tableCursor > 0 {
+					m.tableCursor--
+				}
 			} else if m.view == viewTableItems {
 				if m.activePane == 0 {
-					if m.itemCursor > 0 { 
+					if m.itemCursor > 0 {
 						m.itemCursor--
 						m.updateViewport()
 					}
@@ -301,11 +387,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if m.view == viewTableList {
-				if m.tableCursor < len(m.tables)-1 { m.tableCursor++ }
+				if m.tableCursor < len(m.tables)-1 {
+					m.tableCursor++
+				}
 			} else if m.view == viewTableItems {
 				if m.activePane == 0 {
-					if m.itemCursor < len(m.mockItems)-1 { 
-						m.itemCursor++ 
+					if m.itemCursor < len(m.items)-1 {
+						m.itemCursor++
 						m.updateViewport()
 					}
 				} else {
@@ -319,7 +407,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tableCursor = min(m.tableCursor+amount, len(m.tables)-1)
 			} else if m.view == viewTableItems {
 				if m.activePane == 0 {
-					m.itemCursor = min(m.itemCursor+amount, len(m.mockItems)-1)
+					m.itemCursor = min(m.itemCursor+amount, len(m.items)-1)
 					m.updateViewport()
 				} else {
 					m.viewport.HalfViewDown()
@@ -341,14 +429,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter", " ":
 			if m.view == viewTableList && msg.String() == "enter" {
-				m.view = viewTableItems
-				m.itemCursor = 0
-				m.updateViewport()
+				if len(m.tables) > 0 {
+					m.loading = true
+					m.view = viewLoading
+					m.statusMessage = fmt.Sprintf("Scanning %s...", m.tables[m.tableCursor].Name)
+					return m, scanTable(m.tables[m.tableCursor].Name)
+				}
 			} else if m.view == viewTableItems {
 				m.activePane = 1
 			}
 		}
-	
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -365,7 +456,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateViewport() {
-	selectedItem := m.mockItems[m.itemCursor]
+	if len(m.items) == 0 {
+		m.viewport.SetContent("No items found.")
+		return
+	}
+	selectedItem := m.items[m.itemCursor]
 	b, _ := json.MarshalIndent(selectedItem, "", "  ")
 	m.viewport.SetContent(highlightJSON(string(b)))
 }
@@ -378,12 +473,22 @@ func (m model) View() string {
 	switch m.view {
 	case viewLoading:
 		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
-			fmt.Sprintf("%s Loading tables from AWS...", m.spinner.View()),
+			fmt.Sprintf("%s %s", m.spinner.View(), m.statusMessage),
 		)
 	case viewTableList:
 		content = m.renderTableList()
 	case viewTableItems:
 		content = m.renderTableItems()
+	case viewError:
+		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+			lipgloss.JoinVertical(lipgloss.Center,
+				lipgloss.NewStyle().Foreground(warning).Bold(true).Render("ERROR"),
+				"",
+				lipgloss.NewStyle().Width(m.width/2).Align(lipgloss.Center).Render(fmt.Sprintf("%v", m.err)),
+				"",
+				lipgloss.NewStyle().Foreground(subtle).Render("Press any key to continue"),
+			),
+		)
 	}
 
 	// RENDER HELP
@@ -427,29 +532,34 @@ func (m model) renderTableList() string {
 	leftPane = lipgloss.NewStyle().Width(leftWidth).Render(leftPane)
 
 	rightWidth := m.width - leftWidth - 4
+	
+	// Details Pane
+	if len(m.tables) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "\n", "  No tables found.")
+	}
+	
 	selected := m.tables[m.tableCursor]
 
 	// Schema Map Visualizer
-	tree := fmt.Sprintf("Table: %s\n", selected.Name)
-	tree += fmt.Sprintf("├── PK: %s (S)\n", selected.PK)
-	tree += fmt.Sprintf("└── SK: %s (S)\n", selected.SK)
+	tree := fmt.Sprintf("Table: %s (%s)\n", selected.Name, selected.Status)
+	tree += fmt.Sprintf("Items: %d\n", selected.ItemCount)
+	tree += fmt.Sprintf("├── PK: %s (HASH)\n", selected.PK)
+	if selected.SK != "" {
+		tree += fmt.Sprintf("└── SK: %s (RANGE)\n", selected.SK)
+	} else {
+		tree += "└── (No Sort Key)\n"
+	}
 	
 	if len(selected.GSIs) > 0 {
-		tree += "\nIndexes:\n"
+		tree += "\nIndexes (GSI):\n"
 		for i, idx := range selected.GSIs {
 			isLast := i == len(selected.GSIs)-1
 			prefix := "├──"
 			if isLast { prefix = "└──" }
 			tree += fmt.Sprintf("%s %s\n", prefix, idx)
-			
-			// Sub-tree for index keys
-			subPrefix := "│   "
-			if isLast { subPrefix = "    " }
-			tree += fmt.Sprintf("%s├── PK: %s_pk\n", subPrefix, idx)
-			tree += fmt.Sprintf("%s└── SK: %s_sk\n", subPrefix, idx)
 		}
 	} else {
-		tree += "\n(No Indexes)"
+		tree += "\n(No Global Indexes)"
 	}
 
 	details := lipgloss.JoinVertical(lipgloss.Left,
@@ -464,6 +574,9 @@ func (m model) renderTableList() string {
 }
 
 func (m model) renderTableItems() string {
+	if len(m.tables) == 0 {
+		return "No tables available."
+	}
 	selectedTable := m.tables[m.tableCursor]
 	header := headerStyle.Width(m.width).Render(fmt.Sprintf("Viewing: %s", selectedTable.Name))
 
@@ -472,29 +585,27 @@ func (m model) renderTableItems() string {
 	rightWidth := m.width - leftWidth - 4
 
 	// --- LEFT PANE: Item List ---
-	wPK := int(float64(leftWidth) * 0.5)
-	wSK := leftWidth - wPK - 4
+	
+	// Just use generic ID column since we don't know PK/SK
+	wPK := leftWidth - 4
 	
 	// List Header
-	tableHeader := lipgloss.JoinHorizontal(lipgloss.Left,
-		itemHeaderStyle.Width(wPK).Render("PARTITION KEY"),
-		itemHeaderStyle.Width(wSK).Render("SORT KEY"),
-	)
+	tableHeader := itemHeaderStyle.Width(wPK).Render("ITEMS (Summary)")
 
 	// Windowing Logic
 	availableHeight := m.height - 15 
 	if availableHeight < 1 { availableHeight = 1 }
 	
 	start := 0
-	end := len(m.mockItems)
+	end := len(m.items)
 	
-	if len(m.mockItems) > availableHeight {
+	if len(m.items) > availableHeight {
 		if m.itemCursor < availableHeight/2 {
 			start = 0
 			end = availableHeight
-		} else if m.itemCursor >= len(m.mockItems)-availableHeight/2 {
-			start = len(m.mockItems) - availableHeight
-			end = len(m.mockItems)
+		} else if m.itemCursor >= len(m.items)-availableHeight/2 {
+			start = len(m.items) - availableHeight
+			end = len(m.items)
 		} else {
 			start = m.itemCursor - availableHeight/2
 			end = start + availableHeight
@@ -502,21 +613,36 @@ func (m model) renderTableItems() string {
 	}
 
 	var rows []string
+	if len(m.items) == 0 {
+		rows = append(rows, itemRowStyle.Render("No items found or empty table."))
+	}
+
 	for i := start; i < end; i++ {
-		item := m.mockItems[i]
-		pk := fmt.Sprintf("%v", item["pk"])
-		sk := fmt.Sprintf("%v", item["sk"])
+		item := m.items[i]
 		
+		// Grab first two keys to display as a summary
+		var keys []string
+		for k := range item {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // Consistent order
+		
+		summary := ""
+		if len(keys) > 0 { summary += fmt.Sprintf("%s=%v ", keys[0], item[keys[0]]) }
+		if len(keys) > 1 { summary += fmt.Sprintf("%s=%v", keys[1], item[keys[1]]) }
+		if summary == "" { summary = "{empty}" }
+
+		// Truncate
+		if len(summary) > wPK-2 {
+			summary = summary[:wPK-2] + ".."
+		}
+
 		style := itemRowStyle
 		if m.itemCursor == i {
 			style = style.Copy().Background(highlight).Foreground(lipgloss.Color("#FFF"))
 		}
 		
-		row := lipgloss.JoinHorizontal(lipgloss.Left,
-			style.Width(wPK).Render(pk),
-			style.Width(wSK).Render(sk),
-		)
-		rows = append(rows, row)
+		rows = append(rows, style.Width(wPK).Render(summary))
 	}
 	
 	// Use JoinVertical for the list
@@ -594,33 +720,16 @@ func highlightJSON(s string) string {
 	}
 	return strings.Join(out, "\n")
 }
-func generateMockData(n int) []Item {
-	var items []Item
-	for i := 0; i < n; i++ {
-		items = append(items, Item{
-			"pk":          fmt.Sprintf("USER#%03d", i+1),
-			"sk":          "PROFILE",
-			"name":        fmt.Sprintf("User %d", i+1),
-			"age":         20 + (i % 50),
-			"is_active":   i%3 != 0,
-			"rating":      float64(i%50) / 10.0 + 1.5,
-			"roles":       []string{"user", "editor"},
-			"settings": map[string]interface{}{
-				"theme": "dark",
-				"notifications": map[string]bool{
-					"email": true,
-					"push":  false,
-				},
-			},
-			"notes":       "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-			"last_login":  nil,
-		})
-	}
-	return items
-}
-
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	f, err := tea.LogToFile("debug.log", "debug")
+	if err != nil {
+		fmt.Println("fatal:", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	m := initialModel()
+	p := tea.NewProgram(&m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 		os.Exit(1)

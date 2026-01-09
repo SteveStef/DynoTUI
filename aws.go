@@ -44,6 +44,82 @@ func ListAllTables(ctx context.Context, region string) ([]string, error) {
 	return out, nil
 }
 
+type TableDetails struct {
+	Name      string
+	PK        string
+	SK        string
+	Region    string
+	ItemCount int64
+	GSIs      []string
+	Status    string
+}
+
+// ListTablesWithDetails fetches names and then calls DescribeTable for each to get schema info.
+func ListTablesWithDetails(ctx context.Context, region string) ([]TableDetails, error) {
+	names, err := ListAllTables(ctx, region)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, err
+	}
+	client := dynamodb.NewFromConfig(cfg)
+
+	var tables []TableDetails
+	for _, name := range names {
+		resp, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+			TableName: aws.String(name),
+		})
+		if err != nil {
+			// Skip tables we can't describe or handle error? 
+			// For now, let's just log print and continue or return error. 
+			// Best to return error for TUI feedback.
+			return nil, fmt.Errorf("describe table %s: %w", name, err)
+		}
+		
+		t := resp.Table
+		details := TableDetails{
+			Name:      *t.TableName,
+			Region:    region,
+			ItemCount: 0,
+			Status:    string(t.TableStatus),
+		}
+		if t.ItemCount != nil {
+			details.ItemCount = *t.ItemCount
+		}
+
+		// Parse Key Schema
+		for _, k := range t.KeySchema {
+			if k.KeyType == types.KeyTypeHash {
+				details.PK = *k.AttributeName
+			} else if k.KeyType == types.KeyTypeRange {
+				details.SK = *k.AttributeName
+			}
+		}
+
+		// Parse GSIs
+		for _, gsi := range t.GlobalSecondaryIndexes {
+			details.GSIs = append(details.GSIs, *gsi.IndexName)
+		}
+
+		// Get Real-Time Count (Scan with Count)
+		// valid for small dev tables; caution on large prod tables
+		scanOut, err := client.Scan(ctx, &dynamodb.ScanInput{
+			TableName: aws.String(name),
+			Select:    types.SelectCount,
+		})
+		if err == nil {
+			details.ItemCount = int64(scanOut.Count)
+		}
+
+		tables = append(tables, details)
+	}
+
+	return tables, nil
+}
+
 // ScanTable fetches all items from the specified DynamoDB table.
 func ScanTable(ctx context.Context, region string, tableName string) ([]map[string]interface{}, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -116,13 +192,4 @@ func unmarshalItem(item map[string]types.AttributeValue) map[string]interface{} 
 	return out
 }
 
-func main() {
-	ctx := context.Background()
-	tables, err := ListAllTables(ctx, "us-east-1")
-	items, error := ScanTable(ctx, "us-east-1", tables[0])
-	if err != nil { panic(err) }
-	if error != nil { panic(error) }
-	fmt.Println(tables)
-	fmt.Println(items[0])
-}
 
