@@ -11,6 +11,35 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
+func SqlQuery(ctx context.Context, region string, operation Operation) ([]map[string]interface{}, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+
+	client := dynamodb.NewFromConfig(cfg)
+
+	input := &dynamodb.ExecuteStatementInput{
+		Statement: aws.String(operation.expression),
+	}
+
+	if len(operation.params) > 0 {
+		input.Parameters = operation.params
+	}
+
+	result, err := client.ExecuteStatement(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("PartiQL execution failed: %w", err)
+	}
+
+	var items []map[string]interface{}
+	if err := attributevalue.UnmarshalListOfMaps(result.Items, &items); err != nil {
+		return nil, fmt.Errorf("unmarshal items: %w", err)
+	}
+
+	return items, nil
+}
+
 // ListAllTables returns all DynamoDB table names in the configured account/region.
 func ListAllTables(ctx context.Context, region string) ([]string, error) {
 	// Loads credentials from the standard AWS chain:

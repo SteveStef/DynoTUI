@@ -6,6 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	//"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 )
 
 // --- Enums ---
@@ -81,3 +83,9 @@ func initialModel() model {
 		statusMessage: "Loading tables from AWS...",
 	}
 }
+
+type Operation struct {
+	expression string
+	params     []types.AttributeValue
+}
+

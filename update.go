@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"context"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -182,6 +185,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sqlGeneratedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.view = viewError
+		} else {
+			log.Printf("Bedrock Generated SQL: %s", msg.sql)
+			m.statusMessage = "Executing Generated SQL..."
+			
+			// Trigger execution immediately
+			return m, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				// We need an empty Operation wrapper for now as SqlQuery expects it
+				// Ideally we should refactor SqlQuery to take a raw string or the struct properly populated
+				// But based on current definition:
+				op := Operation{
+					expression: msg.sql,
+					params:     []types.AttributeValue{},
+				}
+
+				items, err := SqlQuery(ctx, "us-east-1", op)
+				if err != nil {
+					return errMsg(err)
+				}
+				return itemsLoadedMsg(items)
+			}
+		}
+		return m, nil
+
 	case errMsg:
 		m.err = msg
 		m.loading = false
@@ -243,7 +277,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputMode = false
 				m.input.Blur()
 				if msg.String() == "enter" {
+					question := m.input.Value()
 					m.input.SetValue("") // Clear on execute
+					if question != "" && len(m.tables) > 0 {
+						m.loading = true
+						m.statusMessage = "Generating SQL with Bedrock..."
+						return m, generateSQLCmd(question, m.tables[m.tableCursor])
+					}
 				}
 			}
 			m.input, cmd = m.input.Update(msg)

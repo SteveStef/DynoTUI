@@ -4,6 +4,10 @@ package main
 
 type tablesLoadedMsg []TableDetails // Using the struct from aws.go
 type itemsLoadedMsg []map[string]interface{}
+type sqlGeneratedMsg struct {
+	sql string
+	err error
+}
 type editorFinishedMsg struct {
 	newItem Item
 	err     error
