@@ -1,1 +1,19 @@
-.git/
+# Binaries
+dynotui
+dynotui.exe
+dynotui-mac
+dynotui-linux
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs (Contains sensitive DB data!)
+*.log
+debug.log
+
+# Editor/OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp
