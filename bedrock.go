@@ -41,7 +41,7 @@ type NovaResponse struct {
 func InvokeBedrock(ctx context.Context, question string, table Table) ([]string, error) {
 	log.Printf("InvokeBedrock called with question: '%s' for table: '%s'", question, table.Name)
 
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}

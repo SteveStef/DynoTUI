@@ -4,7 +4,11 @@ import "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 // --- Messages ---
 
-type tablesLoadedMsg []TableDetails // Using the struct from aws.go
+type tablesLoadedMsg struct {
+	tables []TableDetails
+	region string
+	accountId string
+}
 type itemsLoadedMsg struct {
 	items    []map[string]interface{}
 	nextKey  map[string]types.AttributeValue

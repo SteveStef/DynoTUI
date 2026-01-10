@@ -62,6 +62,8 @@ type model struct {
 	isCustomQuery bool
 	lastEvaluatedKey map[string]types.AttributeValue
 	previousView currentView
+	Region string
+	AccountId string
 }
 
 func initialModel() model {

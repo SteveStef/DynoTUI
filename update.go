@@ -70,8 +70,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tablesLoadedMsg:
 		m.loading = false
 		m.view = viewTableList
-		m.tables = make([]Table, len(msg))
-		for i, t := range msg {
+		m.tables = make([]Table, len(msg.tables))
+		m.Region = msg.region
+		m.AccountId = msg.accountId
+		for i, t := range msg.tables {
 			m.tables[i] = Table{
 				Name:      t.Name,
 				PK:        t.PK,
@@ -335,28 +337,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						
 						if isMutation {
-							_, err := SqlQuery(ctx, "us-east-1", op)
+							_, err := SqlQuery(ctx, op)
 							if err != nil { return errMsg(err) }
 							// Perform a fresh scan for mutations
-							scanItems, nextKey, err := ScanTable(ctx, "us-east-1", m.tables[m.tableCursor].Name, nil)
+							scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
 							if err != nil { return errMsg(err) }
 							return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
 						}
 						
-						items, err := SqlQuery(ctx, "us-east-1", op)
+						items, err := SqlQuery(ctx, op)
 						if err != nil { return errMsg(err) }
 						return itemsLoadedMsg{items: items, isAppend: false}
 					}
 
 					// Otherwise use Batch
-					items, err := BatchSqlQuery(ctx, "us-east-1", m.generatedSql)
+					items, err := BatchSqlQuery(ctx, m.generatedSql)
 					if err != nil {
 						return errMsg(err)
 					}
 
 					if isMutation {
 						// Perform a fresh scan
-						scanItems, nextKey, err := ScanTable(ctx, "us-east-1", m.tables[m.tableCursor].Name, nil)
+						scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
 						if err != nil {
 							return errMsg(err)
 						}

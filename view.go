@@ -111,8 +111,40 @@ func (m model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, content, gap, "  "+helpView, cmdBarBox)
 }
 
+func (m model) renderHeader(title string) string {
+    regionText := fmt.Sprintf("Region: %s", m.Region)
+    if m.Region == "" { regionText = "Region: Loading..." }
+
+	accountText := fmt.Sprintf("Account: %s", m.AccountId)
+	if m.AccountId == "" { accountText = "Account: Loading..." }
+
+	infoText := fmt.Sprintf("%s | %s", accountText, regionText)
+
+    // Left part
+    left := lipgloss.NewStyle().
+        Background(highlight).
+        Foreground(lipgloss.Color("#FFFDF5")).
+        Bold(true).
+        Padding(0, 1).
+        Render(title)
+
+    // Right part
+    right := lipgloss.NewStyle().
+        Background(highlight).
+        Foreground(lipgloss.Color("#FFFDF5")).
+        Padding(0, 1).
+        Render(infoText)
+        
+    // Spacer
+    w := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+    if w < 0 { w = 0 }
+    spacer := lipgloss.NewStyle().Background(highlight).Width(w).Render("")
+    
+    return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
+}
+
 func (m model) renderTableList() string {
-	header := headerStyle.Width(m.width).Render("DynamoDB TUI - Tables")
+	header := m.renderHeader("DynamoDB TUI - Tables")
 
 	leftWidth := int(float64(m.width) * 0.4)
 	var listItems []string
@@ -177,7 +209,7 @@ func (m model) renderTableItems() string {
 		return "No tables available."
 	}
 	selectedTable := m.tables[m.tableCursor]
-	header := headerStyle.Width(m.width).Render(fmt.Sprintf("Viewing: %s", selectedTable.Name))
+	header := m.renderHeader(fmt.Sprintf("Viewing: %s", selectedTable.Name))
 
 	// Split View Dimensions
 	leftWidth := int(float64(m.width) * 0.4)
@@ -246,7 +278,8 @@ func (m model) renderTableItems() string {
 					style = style.Copy().Background(highlight).Foreground(lipgloss.Color("#FFF"))
 				}
 				
-				rows = append(rows, style.Width(wPK).Render(summary))
+			
+rows = append(rows, style.Width(wPK).Render(summary))
 			}	
 	// Use JoinVertical for the list
 	itemTable := lipgloss.JoinVertical(lipgloss.Left, rows...)
