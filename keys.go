@@ -20,15 +20,16 @@ type keyMap struct {
 	Save  key.Binding
 	Add   key.Binding
 	Delete key.Binding
+	LoadMore key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.Slash, k.Edit, k.Add, k.Delete, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Enter, k.Slash, k.Edit, k.Add, k.Delete, k.LoadMore, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Enter},
+		{k.Up, k.Down, k.Enter, k.LoadMore},
 		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save, k.Add, k.Delete},
 	}
 }
@@ -85,5 +86,9 @@ var keys = keyMap{
 	Delete: key.NewBinding(
 		key.WithKeys("d"),
 		key.WithHelp("d", "delete an item"),
+	),
+	LoadMore: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "load next page"),
 	),
 }

@@ -199,42 +199,47 @@ func ListTablesWithDetails(ctx context.Context, region string) ([]TableDetails, 
 	return tables, nil
 }
 
-// ScanTable fetches all items from the specified DynamoDB table.
-func ScanTable(ctx context.Context, region string, tableName string) ([]map[string]interface{}, error) {
+// ScanTable fetches items from DynamoDB. It accepts an exclusiveStartKey for pagination.
+// It returns up to 1000 items and the LastEvaluatedKey for the next page.
+func ScanTable(ctx context.Context, region string, tableName string, startKey map[string]types.AttributeValue) ([]map[string]interface{}, map[string]types.AttributeValue, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
+		return nil, nil, fmt.Errorf("load aws config: %w", err)
 	}
 
 	client := dynamodb.NewFromConfig(cfg)
 	var items []map[string]interface{}
+	var lastKey map[string]types.AttributeValue = startKey
 
-	paginator := dynamodb.NewScanPaginator(client, &dynamodb.ScanInput{
-		TableName: aws.String(tableName),
-	})
+	// Loop until we have 1000 items or no more pages
+	for {
+		input := &dynamodb.ScanInput{
+			TableName:         aws.String(tableName),
+			ExclusiveStartKey: lastKey,
+			Limit:             aws.Int32(1000 - int32(len(items))), // Request only what we need to reach 1000
+		}
 
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
+		resp, err := client.Scan(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("scan page: %w", err)
-		}
-		
-		for _, item := range page.Items {
-			var unmarshalledItem map[string]interface{}
-			if err := attributevalue.UnmarshalMap(item, &unmarshalledItem); err != nil {
-				// Log error or skip? For now, we'll try to continue
-				continue 
-			}
-			items = append(items, unmarshalledItem)
+			return nil, nil, fmt.Errorf("scan failed: %w", err)
 		}
 
-		// Safety break for development: limit to 1000 items
-		if len(items) >= 1000 {
+		for _, item := range resp.Items {
+			var unmarshalledItem map[string]interface{}
+			if err := attributevalue.UnmarshalMap(item, &unmarshalledItem); err == nil {
+				items = append(items, unmarshalledItem)
+			}
+		}
+
+		lastKey = resp.LastEvaluatedKey
+
+		// Stop if we have enough items or if there are no more items to scan
+		if len(items) >= 1000 || lastKey == nil {
 			break
 		}
 	}
 
-	return items, nil
+	return items, lastKey, nil
 }
 
 // PutItem uploads an item to DynamoDB (Update/Insert)

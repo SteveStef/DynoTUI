@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -29,18 +30,31 @@ func loadTables() tea.Msg {
 
 
 
-func scanTable(name string) tea.Cmd {
+func scanTable(name string, startKey map[string]types.AttributeValue, isAppend bool) tea.Cmd {
+
 	return func() tea.Msg {
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
 		defer cancel()
 
-		items, err := ScanTable(ctx, "us-east-1", name)
+
+
+		items, nextKey, err := ScanTable(ctx, "us-east-1", name, startKey)
+
 		if err != nil {
+
 			return errMsg(err)
+
 		}
-		return itemsLoadedMsg(items)
+
+		return itemsLoadedMsg{items: items, nextKey: nextKey, isAppend: isAppend}
+
 	}
+
 }
+
+
 
 func saveItemCmd(tableName string, item Item) tea.Cmd {
 	return func() tea.Msg {

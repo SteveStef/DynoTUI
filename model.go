@@ -60,6 +60,8 @@ type model struct {
 	generatedSql []string
 	isScanWarning bool
 	isCustomQuery bool
+	lastEvaluatedKey map[string]types.AttributeValue
+	previousView currentView
 }
 
 func initialModel() model {

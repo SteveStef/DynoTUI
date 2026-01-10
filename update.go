@@ -87,14 +87,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case itemsLoadedMsg:
 		m.loading = false
 		m.view = viewTableItems
-		newItems := make([]Item, len(msg))
-		for i, item := range msg {
+		
+		newItems := make([]Item, len(msg.items))
+		for i, item := range msg.items {
 			newItems[i] = Item(item)
 		}
-		m.items = newItems
-		m.modifiedItems = make(map[int]bool)
-		m.itemCursor = 0
-		m.activePane = 0
+
+		if msg.isAppend {
+			m.items = append(m.items, newItems...)
+			// Don't reset cursor or pane on append, just viewport update
+			// Maybe move cursor to start of new items?
+		} else {
+			m.items = newItems
+			m.modifiedItems = make(map[int]bool)
+			m.itemCursor = 0
+			m.activePane = 0
+		}
+		
+		m.lastEvaluatedKey = msg.nextKey
 		m.updateViewport()
 		return m, nil
 
@@ -315,7 +325,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						items, err := SqlQuery(ctx, "us-east-1", op)
 						if err != nil { return errMsg(err) }
-						return itemsLoadedMsg(items)
+						return itemsLoadedMsg{items: items, isAppend: false}
 					}
 
 					// Otherwise use Batch
@@ -323,10 +333,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err != nil {
 						return errMsg(err)
 					}
-					return itemsLoadedMsg(items)
+					return itemsLoadedMsg{items: items, isAppend: false}
 				}
 			case "n", "N", "esc":
-				m.view = viewTableItems
+				m.view = m.previousView
 				return m, nil
 			default:
 				return m, nil
@@ -352,7 +362,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					question := m.input.Value()
 					m.input.SetValue("") // Clear on execute
 					if question != "" && len(m.tables) > 0 {
+						m.previousView = m.view // Save current view (List or Items)
 						m.loading = true
+						m.view = viewLoading
 						m.statusMessage = "Generating SQL with Bedrock..."
 						return m, generateSQLCmd(question, m.tables[m.tableCursor])
 					}
@@ -370,7 +382,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.view = viewLoading
 					m.statusMessage = fmt.Sprintf("Reloading full table %s...", m.tables[m.tableCursor].Name)
 					m.isCustomQuery = false
-					return m, scanTable(m.tables[m.tableCursor].Name)
+					return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
 				}
 				m.view = viewTableList
 				m.items = []Item{} // Clear items to save memory
@@ -456,7 +468,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.view = viewLoading
 					m.isCustomQuery = false
 					m.statusMessage = fmt.Sprintf("Scanning %s...", m.tables[m.tableCursor].Name)
-					return m, scanTable(m.tables[m.tableCursor].Name)
+					return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
 				}
 			} else if m.view == viewTableItems {
 				m.activePane = 1
@@ -472,6 +484,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "a", "A":
 			if m.view == viewTableItems {
 				return m, openEditor(nil, true)
+			}
+			
+		case "p", "P":
+			if m.view == viewTableItems && !m.isCustomQuery {
+				if m.lastEvaluatedKey != nil {
+					m.loading = true
+					m.view = viewLoading
+					m.statusMessage = "Loading next page..."
+					return m, scanTable(m.tables[m.tableCursor].Name, m.lastEvaluatedKey, true)
+				}
+				// Optional: Flash a message if no more pages
 			}
 
 		case "s", "S":

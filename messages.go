@@ -1,9 +1,15 @@
 package main
 
+import "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 // --- Messages ---
 
 type tablesLoadedMsg []TableDetails // Using the struct from aws.go
-type itemsLoadedMsg []map[string]interface{}
+type itemsLoadedMsg struct {
+	items    []map[string]interface{}
+	nextKey  map[string]types.AttributeValue
+	isAppend bool
+}
 type sqlGeneratedMsg struct {
 	sqls []string
 	err  error

@@ -39,3 +39,23 @@ debug 2026/01/10 15:04:41 InvokeBedrock called with question: 'get item with id 
 debug 2026/01/10 15:04:41 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id"='socks']
 debug 2026/01/10 15:04:43 Edit key pressed. View: 2, Items: 1
 debug 2026/01/10 15:04:43 Opening editor...
+debug 2026/01/10 15:11:56 InvokeBedrock called with question: 'get items where soup < 4' for table: 'test_table'
+debug 2026/01/10 15:11:57 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "soup" < 4]
+debug 2026/01/10 15:12:01 Edit key pressed. View: 2, Items: 1
+debug 2026/01/10 15:12:01 Opening editor...
+debug 2026/01/10 15:16:16 Starting loadTables...
+debug 2026/01/10 15:16:16 Calling ListTablesWithDetails...
+debug 2026/01/10 15:16:16 Successfully loaded 1 tables
+debug 2026/01/10 15:16:39 InvokeBedrock called with question: 'jk' for table: 'test_table'
+debug 2026/01/10 15:16:40 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id" = 'jk']
+debug 2026/01/10 15:18:46 InvokeBedrock called with question: 'in the test_table get item with id of socks' for table: 'test_table'
+debug 2026/01/10 15:18:46 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id" ='socks']
+debug 2026/01/10 15:19:04 InvokeBedrock called with question: 'get item with id of socks' for table: 'test_table'
+debug 2026/01/10 15:19:04 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id"='socks']
+debug 2026/01/10 15:24:00 Starting loadTables...
+debug 2026/01/10 15:24:00 Calling ListTablesWithDetails...
+debug 2026/01/10 15:24:00 Successfully loaded 1 tables
+debug 2026/01/10 15:24:21 InvokeBedrock called with question: 'get Item with id of socks' for table: 'test_table'
+debug 2026/01/10 15:24:22 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id"='socks']
+debug 2026/01/10 15:24:32 InvokeBedrock called with question: 'Get id of 2' for table: 'test_table'
+debug 2026/01/10 15:24:33 Bedrock Generated SQLs: [SELECT "id" FROM "test_table" WHERE "id" = '2']
