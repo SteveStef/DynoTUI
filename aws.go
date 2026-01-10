@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	// "time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -70,11 +72,9 @@ func BatchSqlQuery(ctx context.Context, region string, statements []string) ([]m
 
 	// Aggregate all responses
 	var allItems []map[string]interface{}
-	for _, resp := range result.Responses {
+	for i, resp := range result.Responses {
 		if resp.Error != nil {
-			// Log error but continue? Or fail all? 
-			// For now, let's include an error item or just log it.
-			// Ideally we return a partial failure struct.
+			log.Printf("Batch statement %d error: %s - %s", i, resp.Error.Code, *resp.Error.Message)
 			continue
 		}
 		

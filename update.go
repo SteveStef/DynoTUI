@@ -311,18 +311,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.view = viewLoading
 				m.statusMessage = "Executing SQL Batch..."
-				m.isCustomQuery = true
+				
+				// Determine if it's a mutation to set the UI state correctly
+				isMutation := false
+				for _, sql := range m.generatedSql {
+					upper := strings.ToUpper(strings.TrimSpace(sql))
+					if strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE") || strings.HasPrefix(upper, "DELETE") {
+						isMutation = true
+						break
+					}
+				}
+				m.isCustomQuery = !isMutation
 				
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 					defer cancel()
 					
-					// If single statement, use normal ExecuteStatement (better error handling for simple queries)
+					// If single statement, use normal ExecuteStatement
 					if len(m.generatedSql) == 1 {
 						op := Operation{
 							expression: m.generatedSql[0],
 							params:     []types.AttributeValue{},
 						}
+						
+						if isMutation {
+							_, err := SqlQuery(ctx, "us-east-1", op)
+							if err != nil { return errMsg(err) }
+							// Perform a fresh scan for mutations
+							scanItems, nextKey, err := ScanTable(ctx, "us-east-1", m.tables[m.tableCursor].Name, nil)
+							if err != nil { return errMsg(err) }
+							return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
+						}
+						
 						items, err := SqlQuery(ctx, "us-east-1", op)
 						if err != nil { return errMsg(err) }
 						return itemsLoadedMsg{items: items, isAppend: false}
@@ -333,6 +353,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err != nil {
 						return errMsg(err)
 					}
+
+					if isMutation {
+						// Perform a fresh scan
+						scanItems, nextKey, err := ScanTable(ctx, "us-east-1", m.tables[m.tableCursor].Name, nil)
+						if err != nil {
+							return errMsg(err)
+						}
+						return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
+					}
+
 					return itemsLoadedMsg{items: items, isAppend: false}
 				}
 			case "n", "N", "esc":

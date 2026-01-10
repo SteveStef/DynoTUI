@@ -60,12 +60,19 @@ Schema:
 
 Request: %s
 
+Examples:
+- "Show me users with age 25": SELECT * FROM "Users" WHERE "age" = 25
+- "Add a user with id 1 and name bob": INSERT INTO "Users" VALUE {'id': 1, 'name': 'bob'}
+- "Update user 1 name to alice": UPDATE "Users" SET "name" = 'alice' WHERE "id" = 1
+- "Delete user 1": DELETE FROM "Users" WHERE "id" = 1
+
 Rules:
 1. Return ONLY the raw SQL queries, separated by semicolons if multiple.
 2. No markdown, no explanations.
-3. Use double quotes for table names and column names if reserved words.
+3. Use double quotes for table names and column names if reserved words or case-sensitive.
 4. Use single quotes for string values.
-5. Ensure the queries are valid PartiQL for DynamoDB.
+5. For INSERT, use "VALUE {'key': 'val'}" syntax (singular VALUE, no parentheses).
+6. Ensure the queries are valid PartiQL for DynamoDB.
 `, schemaDesc, question)
 
 	body := NovaRequest{
