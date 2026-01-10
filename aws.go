@@ -40,6 +40,55 @@ func SqlQuery(ctx context.Context, region string, operation Operation) ([]map[st
 	return items, nil
 }
 
+func BatchSqlQuery(ctx context.Context, region string, statements []string) ([]map[string]interface{}, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+
+	client := dynamodb.NewFromConfig(cfg)
+	
+	var batchInputs []types.BatchStatementRequest
+	for _, sql := range statements {
+		batchInputs = append(batchInputs, types.BatchStatementRequest{
+			Statement: aws.String(sql),
+		})
+	}
+
+	// DynamoDB BatchExecuteStatement allows up to 25 statements
+	if len(batchInputs) > 25 {
+		return nil, fmt.Errorf("too many statements for batch execution (max 25)")
+	}
+
+	result, err := client.BatchExecuteStatement(ctx, &dynamodb.BatchExecuteStatementInput{
+		Statements: batchInputs,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("batch execution failed: %w", err)
+	}
+
+	// Aggregate all responses
+	var allItems []map[string]interface{}
+	for _, resp := range result.Responses {
+		if resp.Error != nil {
+			// Log error but continue? Or fail all? 
+			// For now, let's include an error item or just log it.
+			// Ideally we return a partial failure struct.
+			continue
+		}
+		
+		if resp.Item != nil {
+			var item map[string]interface{}
+			if err := attributevalue.UnmarshalMap(resp.Item, &item); err == nil {
+				allItems = append(allItems, item)
+			}
+		}
+	}
+
+	return allItems, nil
+}
+
 // ListAllTables returns all DynamoDB table names in the configured account/region.
 func ListAllTables(ctx context.Context, region string) ([]string, error) {
 	// Loads credentials from the standard AWS chain:

@@ -54,6 +54,30 @@ func (m model) View() string {
 				),
 			),
 		)
+	case viewSqlConfirmation:
+		title := lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("Execute Generated SQL?")
+		
+		// Join multiple statements for display
+		joinedSql := strings.Join(m.generatedSql, "\n\n")
+		
+		sqlText := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(m.width - 20).Render(joinedSql)
+		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to execute, n/esc to cancel)")
+		
+		var contentComponents []string
+		contentComponents = append(contentComponents, title, "", sqlText, "")
+		
+		if m.isScanWarning {
+			scanWarn := lipgloss.NewStyle().Foreground(warning).Bold(true).Render("⚠ WARNING: This query may result in a FULL TABLE SCAN!")
+			contentComponents = append(contentComponents, scanWarn, "")
+		}
+		
+		contentComponents = append(contentComponents, controls)
+
+		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+			dialogBoxStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Center, contentComponents...),
+			),
+		)
 	case viewError:
 		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center,

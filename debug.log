@@ -1,0 +1,30 @@
+debug 2026/01/10 14:48:53 Starting loadTables...
+debug 2026/01/10 14:48:53 Calling ListTablesWithDetails...
+debug 2026/01/10 14:48:54 Successfully loaded 1 tables
+debug 2026/01/10 14:48:59 InvokeBedrock called with question: 'get all the items' for table: 'test_table'
+debug 2026/01/10 14:49:00 Bedrock Generated SQL: SELECT * FROM "test_table";
+debug 2026/01/10 14:49:19 InvokeBedrock called with question: 'get all items' for table: 'test_table'
+debug 2026/01/10 14:49:20 Bedrock Generated SQL: SELECT * FROM "test_table";
+debug 2026/01/10 14:49:50 InvokeBedrock called with question: 'get item where id is hello' for table: 'test_table'
+debug 2026/01/10 14:49:50 Bedrock Generated SQL: SELECT * FROM "test_table" WHERE "id" = 'hello';
+debug 2026/01/10 14:50:07 Edit key pressed. View: 2, Items: 1
+debug 2026/01/10 14:50:07 Opening editor...
+debug 2026/01/10 14:50:55 InvokeBedrock called with question: 'get item where id is socks' for table: 'test_table'
+debug 2026/01/10 14:50:55 Bedrock Generated SQL: SELECT * FROM "test_table" WHERE "id" ='socks';
+debug 2026/01/10 14:51:26 InvokeBedrock called with question: 'Create an item with id of milk and soup of 23' for table: 'test_table'
+debug 2026/01/10 14:51:26 Bedrock Generated SQL: INSERT INTO "test_table" 
+VALUES ({"id": "milk", "soup": 23})
+debug 2026/01/10 14:58:17 Starting loadTables...
+debug 2026/01/10 14:58:17 Calling ListTablesWithDetails...
+debug 2026/01/10 14:58:17 Successfully loaded 1 tables
+debug 2026/01/10 14:58:28 InvokeBedrock called with question: 'get item with id of hello' for table: 'test_table'
+debug 2026/01/10 14:58:29 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id" = 'hello']
+debug 2026/01/10 14:59:49 Starting loadTables...
+debug 2026/01/10 14:59:49 Calling ListTablesWithDetails...
+debug 2026/01/10 14:59:49 Successfully loaded 1 tables
+debug 2026/01/10 14:59:54 InvokeBedrock called with question: 'get all items' for table: 'test_table'
+debug 2026/01/10 14:59:54 Bedrock Generated SQLs: [SELECT * FROM "test_table"]
+debug 2026/01/10 14:59:58 InvokeBedrock called with question: 'get all items' for table: 'test_table'
+debug 2026/01/10 14:59:58 Bedrock Generated SQLs: [SELECT * FROM "test_table"]
+debug 2026/01/10 15:00:47 InvokeBedrock called with question: 'get item with id of socks' for table: 'test_table'
+debug 2026/01/10 15:00:47 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id"='socks']

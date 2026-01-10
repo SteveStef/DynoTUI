@@ -21,6 +21,7 @@ const (
 	viewError
 	viewConfirmation
 	viewDeleteConfirmation
+	viewSqlConfirmation
 )
 
 // --- Model ---
@@ -56,6 +57,8 @@ type model struct {
 	activePane  int
 	statusMessage string
 	err         error
+	generatedSql []string
+	isScanWarning bool
 }
 
 func initialModel() model {

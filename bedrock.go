@@ -37,13 +37,13 @@ type NovaResponse struct {
 	} `json:"output"`
 }
 
-// InvokeBedrock calls AWS Bedrock (Amazon Nova Lite) to generate a DynamoDB PartiQL query.
-func InvokeBedrock(ctx context.Context, question string, table Table) (string, error) {
+// InvokeBedrock calls AWS Bedrock (Amazon Nova Lite) to generate DynamoDB PartiQL queries.
+func InvokeBedrock(ctx context.Context, question string, table Table) ([]string, error) {
 	log.Printf("InvokeBedrock called with question: '%s' for table: '%s'", question, table.Name)
 
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
 	if err != nil {
-		return "", fmt.Errorf("load aws config: %w", err)
+		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
 	client := bedrockruntime.NewFromConfig(cfg)
@@ -54,17 +54,18 @@ func InvokeBedrock(ctx context.Context, question string, table Table) (string, e
 		schemaDesc += fmt.Sprintf("Global Secondary Indexes: %v\n", table.GSIs)
 	}
 
-	prompt := fmt.Sprintf(`You are a DynamoDB expert. Generate a PartiQL query for the following request.
+	prompt := fmt.Sprintf(`You are a DynamoDB expert. Generate PartiQL queries for the following request.
 Schema:
 %s
 
 Request: %s
 
 Rules:
-1. Return ONLY the raw SQL query. No markdown, no explanations.
-2. Use double quotes for table names and column names if reserved words.
-3. Use single quotes for string values.
-4. Ensure the query is valid PartiQL for DynamoDB.
+1. Return ONLY the raw SQL queries, separated by semicolons if multiple.
+2. No markdown, no explanations.
+3. Use double quotes for table names and column names if reserved words.
+4. Use single quotes for string values.
+5. Ensure the queries are valid PartiQL for DynamoDB.
 `, schemaDesc, question)
 
 	body := NovaRequest{
@@ -80,14 +81,14 @@ Rules:
 			MaxNewTokens int     `json:"max_new_tokens"`
 			Temperature  float64 `json:"temperature"`
 		}{
-			MaxNewTokens: 200,
+			MaxNewTokens: 300, // Increased for multiple statements
 			Temperature:  0,
 		},
 	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	resp, err := client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
@@ -96,25 +97,35 @@ Rules:
 		Body:        payload,
 	})
 	if err != nil {
-		return "", fmt.Errorf("invoke model: %w", err)
+		return nil, fmt.Errorf("invoke model: %w", err)
 	}
 
 	var response NovaResponse
 	if err := json.Unmarshal(resp.Body, &response); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
+		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	if len(response.Output.Message.Content) == 0 {
-		return "", fmt.Errorf("empty response from model")
+		return nil, fmt.Errorf("empty response from model")
 	}
 
-	sql := response.Output.Message.Content[0].Text
+	rawText := response.Output.Message.Content[0].Text
 
-	// Clean up the response (remove markdown code blocks if present)
-	sql = strings.TrimSpace(sql)
-	sql = strings.ReplaceAll(sql, "```sql", "")
-	sql = strings.ReplaceAll(sql, "```", "")
-	sql = strings.TrimSpace(sql)
+	// Clean up the response
+	rawText = strings.TrimSpace(rawText)
+	rawText = strings.ReplaceAll(rawText, "```sql", "")
+	rawText = strings.ReplaceAll(rawText, "```", "")
+	rawText = strings.TrimSpace(rawText)
 
-	return sql, nil
+	// Split by semicolon and filter empty strings
+	var statements []string
+	parts := strings.Split(rawText, ";")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			statements = append(statements, p)
+		}
+	}
+
+	return statements, nil
 }
