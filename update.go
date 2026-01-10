@@ -301,6 +301,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.view = viewLoading
 				m.statusMessage = "Executing SQL Batch..."
+				m.isCustomQuery = true
 				
 				return m, func() tea.Msg {
 					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -364,6 +365,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q":
 			if m.view == viewTableItems {
+				if m.isCustomQuery {
+					m.loading = true
+					m.view = viewLoading
+					m.statusMessage = fmt.Sprintf("Reloading full table %s...", m.tables[m.tableCursor].Name)
+					m.isCustomQuery = false
+					return m, scanTable(m.tables[m.tableCursor].Name)
+				}
 				m.view = viewTableList
 				m.items = []Item{} // Clear items to save memory
 				m.activePane = 0
@@ -446,6 +454,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.tables) > 0 {
 					m.loading = true
 					m.view = viewLoading
+					m.isCustomQuery = false
 					m.statusMessage = fmt.Sprintf("Scanning %s...", m.tables[m.tableCursor].Name)
 					return m, scanTable(m.tables[m.tableCursor].Name)
 				}

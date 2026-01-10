@@ -28,3 +28,14 @@ debug 2026/01/10 14:59:58 InvokeBedrock called with question: 'get all items' fo
 debug 2026/01/10 14:59:58 Bedrock Generated SQLs: [SELECT * FROM "test_table"]
 debug 2026/01/10 15:00:47 InvokeBedrock called with question: 'get item with id of socks' for table: 'test_table'
 debug 2026/01/10 15:00:47 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id"='socks']
+debug 2026/01/10 15:04:11 Starting loadTables...
+debug 2026/01/10 15:04:11 Calling ListTablesWithDetails...
+debug 2026/01/10 15:04:11 Successfully loaded 1 tables
+debug 2026/01/10 15:04:13 Edit key pressed. View: 2, Items: 2
+debug 2026/01/10 15:04:13 Opening editor...
+debug 2026/01/10 15:04:26 InvokeBedrock called with question: 'get id of hello' for table: 'test_table'
+debug 2026/01/10 15:04:26 Bedrock Generated SQLs: [SELECT "id" FROM "test_table" WHERE "id" = 'hello']
+debug 2026/01/10 15:04:41 InvokeBedrock called with question: 'get item with id of socks' for table: 'test_table'
+debug 2026/01/10 15:04:41 Bedrock Generated SQLs: [SELECT * FROM "test_table" WHERE "id"='socks']
+debug 2026/01/10 15:04:43 Edit key pressed. View: 2, Items: 1
+debug 2026/01/10 15:04:43 Opening editor...

@@ -59,6 +59,7 @@ type model struct {
 	err         error
 	generatedSql []string
 	isScanWarning bool
+	isCustomQuery bool
 }
 
 func initialModel() model {
