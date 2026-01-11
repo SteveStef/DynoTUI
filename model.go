@@ -22,6 +22,7 @@ const (
 	viewConfirmation
 	viewDeleteConfirmation
 	viewSqlConfirmation
+	viewBulkConfirmation
 )
 
 // --- Model ---
@@ -60,7 +61,9 @@ type model struct {
 	activePane  int
 	statusMessage string
 	err         error
-	generatedSql []string
+	llmResult   LLMResult
+	pendingPlanItems []Item
+	bulkActionPending bool
 	isScanWarning bool
 	isCustomQuery bool
 	lastEvaluatedKey map[string]types.AttributeValue

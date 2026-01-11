@@ -272,23 +272,44 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.view = viewError
 		} else {
-			log.Printf("Bedrock Generated SQLs: %v", msg.sqls)
-			m.generatedSql = msg.sqls
-			
-			// Check for scan warning
+			m.llmResult = msg.result
 			m.isScanWarning = false
-			if len(m.tables) > 0 {
-				currentPK := m.tables[m.tableCursor].PK
-				for _, sql := range msg.sqls {
-					if isLikelyScan(sql, currentPK) {
+
+			if m.llmResult.Mode == "sql" {
+				if len(m.tables) > 0 {
+					currentPK := m.tables[m.tableCursor].PK
+					for _, sql := range m.llmResult.Statements {
+						if isLikelyScan(sql, currentPK) {
+							m.isScanWarning = true
+							break
+						}
+					}
+				}
+			} else if m.llmResult.Mode == "plan" {
+				if m.llmResult.Plan.Safety.NeedsConfirmation {
+					if m.llmResult.Plan.Safety.Reason == "full_table_scan" {
 						m.isScanWarning = true
-						break
 					}
 				}
 			}
-			
 			m.view = viewSqlConfirmation
 		}
+		return m, nil
+
+	case bulkDiscoveryLoadedMsg:
+		m.loading = false
+		m.pendingPlanItems = make([]Item, len(msg.items))
+		for i, item := range msg.items {
+			m.pendingPlanItems[i] = Item(item)
+		}
+		
+		if len(m.pendingPlanItems) == 0 {
+			m.statusMessage = "No matching items found."
+			m.view = viewTableItems // Or back to list?
+			return m, nil
+		}
+
+		m.view = viewBulkConfirmation
 		return m, nil
 
 	case errMsg:
@@ -341,65 +362,155 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y", "enter":
 				m.loading = true
 				m.view = viewLoading
-				m.statusMessage = "Executing SQL Batch..."
-				
-				// Determine if it's a mutation to set the UI state correctly
-				isMutation := false
-				for _, sql := range m.generatedSql {
-					upper := strings.ToUpper(strings.TrimSpace(sql))
-					if strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE") || strings.HasPrefix(upper, "DELETE") {
-						isMutation = true
-						break
-					}
-				}
-				m.isCustomQuery = !isMutation
-				
-				return m, func() tea.Msg {
-					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-					defer cancel()
-					
-					// If single statement, use normal ExecuteStatement
-					if len(m.generatedSql) == 1 {
-						op := Operation{
-							expression: m.generatedSql[0],
-							params:     []types.AttributeValue{},
+				m.statusMessage = "Executing..."
+
+				// Mode: SQL
+				if m.llmResult.Mode == "sql" {
+					// Determine if it's a mutation to set the UI state correctly
+					isMutation := false
+					for _, sql := range m.llmResult.Statements {
+						upper := strings.ToUpper(strings.TrimSpace(sql))
+						if strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE") || strings.HasPrefix(upper, "DELETE") {
+							isMutation = true
+							break
 						}
+					}
+					m.isCustomQuery = !isMutation
+					
+					return m, func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+						defer cancel()
 						
-						if isMutation {
-							_, err := SqlQuery(ctx, op)
+						if len(m.llmResult.Statements) == 1 {
+							op := Operation{
+								expression: m.llmResult.Statements[0],
+								params:     []types.AttributeValue{},
+							}
+							
+							if isMutation {
+								_, err := SqlQuery(ctx, op)
+								if err != nil { return errMsg(err) }
+								scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
+								if err != nil { return errMsg(err) }
+								return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
+							}
+							
+							items, err := SqlQuery(ctx, op)
 							if err != nil { return errMsg(err) }
-							// Perform a fresh scan for mutations
+							return itemsLoadedMsg{items: items, isAppend: false}
+						}
+
+						// Batch
+						items, err := BatchSqlQuery(ctx, m.llmResult.Statements)
+						if err != nil { return errMsg(err) }
+
+						if isMutation {
 							scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
 							if err != nil { return errMsg(err) }
 							return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
 						}
-						
-						items, err := SqlQuery(ctx, op)
-						if err != nil { return errMsg(err) }
+
 						return itemsLoadedMsg{items: items, isAppend: false}
 					}
+				} else {
+					// Mode: PLAN
+					return m, func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+						defer cancel()
 
-					// Otherwise use Batch
-					items, err := BatchSqlQuery(ctx, m.generatedSql)
-					if err != nil {
-						return errMsg(err)
-					}
-
-					if isMutation {
-						// Perform a fresh scan
-						scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
-						if err != nil {
-							return errMsg(err)
+						// 1. Execute READ
+						readOp := Operation{
+							expression: m.llmResult.Plan.Read.Partiql,
 						}
-						return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
-					}
+						items, err := SqlQuery(ctx, readOp)
+						if err != nil { return errMsg(err) }
 
-					return itemsLoadedMsg{items: items, isAppend: false}
+						// If Select, we are done
+						if m.llmResult.Plan.Operation == "select" {
+							m.isCustomQuery = true
+							return itemsLoadedMsg{items: items, isAppend: false}
+						}
+
+						// If Scan_Then_Write, proceed to next step
+						return bulkDiscoveryLoadedMsg{items: items}
+					}
 				}
+
 			case "n", "N", "esc":
 				m.view = m.previousView
 				return m, nil
 			default:
+				return m, nil
+			}
+		}
+
+		if m.view == viewBulkConfirmation {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				m.loading = true
+				m.view = viewLoading
+				m.statusMessage = "Executing Bulk Mutations..."
+
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+
+					// Use authoritative table schema for keys, not the LLM's projection list
+					t := m.tables[m.tableCursor]
+					pkName := t.PK
+					skName := t.SK
+					hasSK := (t.SK != "")
+					
+					tpl := m.llmResult.Plan.Write.PerItem.PartiqlTemplate
+					
+					var queries []string
+					for _, item := range m.pendingPlanItems {
+						pkVal := item[pkName]
+						if pkVal == nil {
+							return errMsg(fmt.Errorf("read query result missing Partition Key '%s'", pkName))
+						}
+
+						var skVal any
+						if hasSK {
+							skVal = item[skName]
+							if skVal == nil {
+								return errMsg(fmt.Errorf("read query result missing Sort Key '%s'", skName))
+							}
+						}
+						
+						q, err := SubstituteKeys(tpl, pkVal, skVal, hasSK)
+						if err != nil {
+							return errMsg(err)
+						}
+						queries = append(queries, q)
+					}
+					
+					// Chunking handled by BatchSqlQuery? No, BatchExecuteStatement has limit of 25.
+					// My BatchSqlQuery implementation in aws.go currently errors if > 25.
+					// I need to chunk it here or update BatchSqlQuery.
+					// For now, let's chunk here to be safe.
+					
+					chunkSize := 25
+					for i := 0; i < len(queries); i += chunkSize {
+						end := i + chunkSize
+						if end > len(queries) { end = len(queries) }
+						
+						chunk := queries[i:end]
+						_, err := BatchSqlQuery(ctx, chunk)
+						if err != nil {
+							return errMsg(err)
+						}
+					}
+					
+					// Re-scan
+					scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
+					if err != nil { return errMsg(err) }
+					return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
+				}
+
+			case "n", "N", "esc":
+				m.view = viewTableItems
+				m.pendingPlanItems = nil
 				return m, nil
 			}
 		}

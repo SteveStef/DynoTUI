@@ -77,7 +77,7 @@ func generateSQLCmd(question string, table Table) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		sqls, err := InvokeBedrock(ctx, question, table)
-		return sqlGeneratedMsg{sqls: sqls, err: err}
+		result, err := InvokeBedrock(ctx, question, table)
+		return sqlGeneratedMsg{result: result, err: err}
 	}
 }

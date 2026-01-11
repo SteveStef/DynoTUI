@@ -15,8 +15,8 @@ type itemsLoadedMsg struct {
 	isAppend bool
 }
 type sqlGeneratedMsg struct {
-	sqls []string
-	err  error
+	result LLMResult
+	err    error
 }
 type editorFinishedMsg struct {
 	newItem Item
@@ -26,3 +26,7 @@ type editorFinishedMsg struct {
 type itemSavedMsg struct{ err error }
 type itemDeletedMsg struct{ err error }
 type errMsg error
+
+type bulkDiscoveryLoadedMsg struct {
+	items []map[string]interface{}
+}

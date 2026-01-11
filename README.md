@@ -32,7 +32,7 @@ DynoTUI is a terminal-based user interface (TUI) for exploring and managing AWS 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/dynotui.git
+git clone https://github.com/stevestef/dynotui.git
 cd dynotui
 
 # Run directly

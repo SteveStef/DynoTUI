@@ -57,10 +57,24 @@ func (m model) View() string {
 	case viewSqlConfirmation:
 		title := lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("Execute Generated SQL?")
 		
-		// Join multiple statements for display
-		joinedSql := strings.Join(m.generatedSql, "\n\n")
-		
-		sqlText := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(m.width - 20).Render(joinedSql)
+		var bodyText string
+		if m.llmResult.Mode == "sql" {
+			bodyText = strings.Join(m.llmResult.Statements, "\n\n")
+		} else if m.llmResult.Mode == "plan" {
+			p := m.llmResult.Plan
+			bodyText = fmt.Sprintf("OPERATION: %s\n\n", strings.ToUpper(p.Operation))
+			bodyText += fmt.Sprintf("STEP 1 (READ):\n%s\n\n", p.Read.Partiql)
+			
+			if p.Write != nil {
+				bodyText += fmt.Sprintf("STEP 2 (WRITE - Per Item):\n%s\n", p.Write.PerItem.PartiqlTemplate)
+			}
+			
+			if p.Safety.NeedsConfirmation {
+				bodyText += fmt.Sprintf("\nNOTE: %s", p.Safety.Reason)
+			}
+		}
+
+		sqlText := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(m.width - 20).Render(bodyText)
 		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to execute, n/esc to cancel)")
 		
 		var contentComponents []string
@@ -78,6 +92,38 @@ func (m model) View() string {
 				lipgloss.JoinVertical(lipgloss.Center, contentComponents...),
 			),
 		)
+
+	case viewBulkConfirmation:
+		title := lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("Confirm Bulk Action")
+		
+		count := len(m.pendingPlanItems)
+		info := fmt.Sprintf("Step 1 Complete: Found %d items.", count)
+		
+		var actionStr string
+		if m.llmResult.Plan != nil && m.llmResult.Plan.Write != nil {
+			actionStr = fmt.Sprintf("Step 2: %s ALL %d items?", strings.ToUpper(m.llmResult.Plan.Write.Action), count)
+		} else {
+			actionStr = "Proceed with updates?"
+		}
+
+		infoText := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(info)
+		actionText := lipgloss.NewStyle().Foreground(warning).Bold(true).Render(actionStr)
+		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to execute, n/esc to cancel)")
+		
+		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
+			dialogBoxStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Center,
+					title,
+					"",
+					infoText,
+					"",
+					actionText,
+					"",
+					controls,
+				),
+			),
+		)
+
 	case viewError:
 		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center,
@@ -296,7 +342,7 @@ func (m model) renderTableItems() string {
 	// If SK is empty, maybe just PK and Info
 	
 	colPadding := 1
-	availWidth := leftWidth - 4 // borders/padding
+	availWidth := leftWidth - 5 // borders/padding
 	
 	var col1W, col2W, col3W int
 	
@@ -379,15 +425,28 @@ func (m model) renderTableItems() string {
 
 		for _, k := range keys {
 			if k != selectedTable.PK && k != selectedTable.SK {
-				otherVal = fmt.Sprintf("%s: %v", k, item[k])
+				val := fmt.Sprintf("%v", item[k])
+				val = strings.ReplaceAll(val, "\n", " ") // Ensure no newlines
+				otherVal = fmt.Sprintf("%s: %s", k, val)
 				break
 			}
 		}
 		
 		// Truncate
-		if len(pkVal) > col1W { pkVal = pkVal[:col1W-1] + "…" }
-		if len(skVal) > col2W { skVal = skVal[:col2W-1] + "…" }
-		if len(otherVal) > col3W { otherVal = otherVal[:col3W-1] + "…" }
+		if len(pkVal) > col1W && col1W > 1 { pkVal = pkVal[:col1W-1] + "…" }
+		if len(skVal) > col2W && col2W > 1 { skVal = skVal[:col2W-1] + "…" }
+		
+		limit := col3W - 2
+		if limit < 0 { limit = 0 }
+		if len(otherVal) > col3W { 
+			if col3W > 5 {
+				otherVal = otherVal[:col3W-5] + "…" 
+			} else if col3W > 1 {
+				otherVal = otherVal[:col3W-1] + "…"
+			} else {
+				otherVal = ""
+			}
+		}
 		
 		// Base row style
 		style := tableRowStyle
