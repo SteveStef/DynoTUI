@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func (m *model) Init() tea.Cmd {
@@ -545,6 +546,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modifiedItems = make(map[int]bool)
 				return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
 			}
+			
+		case "t", "T":
+			_ = NextTheme()
+			// Update persistent help styles to match new theme
+			m.help.Styles.ShortKey.Foreground(primary)
+			m.help.Styles.FullKey.Foreground(primary)
+			// Spinner needs update too
+			m.spinner.Style = lipgloss.NewStyle().Foreground(highlight)
+			
+			return m, nil
 
 		case "e", "E":
 			log.Printf("Edit key pressed. View: %v, Items: %d", m.view, len(m.items))

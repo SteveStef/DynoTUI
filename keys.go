@@ -22,6 +22,7 @@ type keyMap struct {
 	Delete key.Binding
 	LoadMore key.Binding
 	Refresh key.Binding
+	Theme   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -30,7 +31,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Enter, k.LoadMore, k.Refresh},
+		{k.Up, k.Down, k.Enter, k.LoadMore, k.Refresh, k.Theme},
 		{k.Back, k.Slash, k.Help, k.Quit, k.Edit, k.Save, k.Add, k.Delete},
 	}
 }
@@ -95,5 +96,9 @@ var keys = keyMap{
 	Refresh: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "refresh table"),
+	),
+	Theme: key.NewBinding(
+		key.WithKeys("t"),
+		key.WithHelp("t", "toggle theme"),
 	),
 }

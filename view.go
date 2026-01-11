@@ -263,7 +263,7 @@ func (m model) renderHelpBox(width int) string {
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ GLOBAL ]"),
 		makeRow("/", "AI Query", "r", "Refresh"),
-		makeRow("q", "Back/Quit", "", ""),
+		makeRow("t", "Theme", "q", "Back/Quit"),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ NAVIGATION ]"),
 		makeRow("k/↑", "Up", "j/↓", "Down"),
