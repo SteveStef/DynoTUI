@@ -61,6 +61,14 @@ var (
 	itemRowStyle = lipgloss.NewStyle().
 		Padding(0, 1)
 
+	tableRowStyle = lipgloss.NewStyle().
+		Padding(0, 1)
+
+	tableSelectedRowStyle = lipgloss.NewStyle().
+		Padding(0, 1).
+		Foreground(lipgloss.Color("#FFF")).
+		Background(primary)
+
 	// Detail Pane
 	detailStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

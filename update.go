@@ -102,6 +102,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.items = newItems
 			m.modifiedItems = make(map[int]bool)
+			m.newItems = make(map[int]bool)
 			m.itemCursor = 0
 			m.activePane = 0
 		}
@@ -119,6 +120,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.items = append(m.items, msg.newItem)
 				m.itemCursor = len(m.items) - 1
 				m.modifiedItems[m.itemCursor] = true
+				m.newItems[m.itemCursor] = true
 				m.updateViewport()
 			} else {
 				m.items[m.itemCursor] = msg.newItem
@@ -134,8 +136,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.view = viewError
 		} else {
-			// Success! Clear modified flag for the saved item
+			// Check if it was a new item BEFORE we start shifting things
+			isNew := m.newItems[m.itemCursor]
+			if isNew {
+				m.tables[m.tableCursor].ItemCount++
+			}
+
+			// Success! Clear modified/new flags for the saved item
 			delete(m.modifiedItems, m.itemCursor)
+			delete(m.newItems, m.itemCursor)
 
 			// Deduplicate: Remove OTHER items with the same PK/SK
 			savedItem := m.items[m.itemCursor]
@@ -152,9 +161,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pkVal := getKeyVal(savedItem, currentTable.PK)
 			skVal := getKeyVal(savedItem, currentTable.SK)
 
-			var newItems []Item
-			// We need to rebuild modifiedItems because indices will shift
+			var newItemsList []Item
+			// We need to rebuild modifiedItems/newItems because indices will shift
 			newModifiedItems := make(map[int]bool)
+			newNewItems := make(map[int]bool)
 			
 			// We track the new index of the current cursor
 			newCursor := m.itemCursor
@@ -165,7 +175,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for srcIdx, item := range m.items {
 				if srcIdx == m.itemCursor {
 					// Always keep the item we just saved
-					newItems = append(newItems, item)
+					newItemsList = append(newItemsList, item)
 					// If it was modified (it shouldn't be now), we'd map it.
 					// newCursor tracks where this lands
 					newCursor = dstIdx
@@ -187,17 +197,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Do NOT increment dstIdx.
 				} else {
 					// Keep this item
-					newItems = append(newItems, item)
-					// Preserve modified status
+					newItemsList = append(newItemsList, item)
+					// Preserve modified/new status
 					if m.modifiedItems[srcIdx] {
 						newModifiedItems[dstIdx] = true
+					}
+					if m.newItems[srcIdx] {
+						newNewItems[dstIdx] = true
 					}
 					dstIdx++
 				}
 			}
 
-			m.items = newItems
+			m.items = newItemsList
 			m.modifiedItems = newModifiedItems
+			m.newItems = newNewItems
 			m.itemCursor = newCursor
 
 			m.view = viewTableItems
@@ -211,6 +225,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.view = viewError
 		} else {
+			// Decrement table count
+			if m.tables[m.tableCursor].ItemCount > 0 {
+				m.tables[m.tableCursor].ItemCount--
+			}
+
 			// Remove the item from the list
 			if len(m.items) > 0 {
 				m.items = append(m.items[:m.itemCursor], m.items[m.itemCursor+1:]...)
@@ -218,11 +237,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.itemCursor >= len(m.items) && m.itemCursor > 0 {
 					m.itemCursor--
 				}
-				// Also clear/rebuild modifiedItems map (simplification: clear it or we have to shift)
-				// For simplicity, we'll clear the modified flag for the deleted index, 
-				// but strictly we should shift keys > cursor down by 1.
-				// Let's rebuild it properly.
+				
+				// Rebuild modifiedItems and newItems
 				newModified := make(map[int]bool)
+				newNew := make(map[int]bool)
 				for k, v := range m.modifiedItems {
 					if k < m.itemCursor {
 						newModified[k] = v
@@ -230,7 +248,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						newModified[k-1] = v
 					}
 				}
+				for k, v := range m.newItems {
+					if k < m.itemCursor {
+						newNew[k] = v
+					} else if k > m.itemCursor {
+						newNew[k-1] = v
+					}
+				}
 				m.modifiedItems = newModified
+				m.newItems = newNew
 			}
 			m.view = viewTableItems
 			m.updateViewport()
@@ -504,6 +530,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.view == viewTableItems {
 				m.activePane = 1
+			}
+
+		case "r", "R":
+			if (m.view == viewTableList || m.view == viewTableItems) && len(m.tables) > 0 {
+				m.loading = true
+				m.view = viewLoading
+				m.isCustomQuery = false
+				m.statusMessage = fmt.Sprintf("Refreshing %s...", m.tables[m.tableCursor].Name)
+				// Reset any "new" items tracking since we are reloading from source
+				m.newItems = make(map[int]bool)
+				m.modifiedItems = make(map[int]bool)
+				return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
 			}
 
 		case "e", "E":

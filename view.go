@@ -304,6 +304,7 @@ func (m model) renderTableItems() string {
 	
 	for i := start; i < end; i++ {
 		item := m.items[i]
+		isSelected := m.itemCursor == i
 		
 		// Extract Values
 		pkVal := fmt.Sprintf("%v", item[selectedTable.PK])
@@ -332,31 +333,37 @@ func (m model) renderTableItems() string {
 		if len(skVal) > col2W { skVal = skVal[:col2W-1] + "…" }
 		if len(otherVal) > col3W { otherVal = otherVal[:col3W-1] + "…" }
 		
-		// Render Row
-		c1 := lipgloss.NewStyle().Width(col1W).Foreground(lipgloss.Color("252")).Render(pkVal)
+		// Base row style
+		style := tableRowStyle
+		if isSelected {
+			style = tableSelectedRowStyle
+		}
+
+		// Row content with colors
+		pkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+		skStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+		infoStyle := lipgloss.NewStyle().Foreground(textDim)
+
+		if isSelected {
+			skStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+			infoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+		}
+
+		// Cursor
+		cursor := "  "
+		if isSelected {
+			cursor = "▸ "
+		}
+
+		c1 := pkStyle.Width(col1W).Render(pkVal)
 		c2 := ""
 		if hasSK {
-			c2 = lipgloss.NewStyle().Width(col2W).PaddingLeft(colPadding).Foreground(lipgloss.Color("246")).Render(skVal)
+			c2 = skStyle.Width(col2W).PaddingLeft(colPadding).Render(skVal)
 		}
-		c3 := lipgloss.NewStyle().Width(col3W).PaddingLeft(colPadding).Foreground(textDim).Render(otherVal)
+		c3 := infoStyle.Width(col3W).PaddingLeft(colPadding).Render(otherVal)
 		
-		rowContent := lipgloss.JoinHorizontal(lipgloss.Left, c1, c2, c3)
-		
-		// Highlight Selection
-		style := itemRowStyle
-		if m.itemCursor == i {
-			// Override colors for selection
-			c1 = lipgloss.NewStyle().Width(col1W).Foreground(lipgloss.Color("#FFF")).Render(pkVal)
-			if hasSK {
-				c2 = lipgloss.NewStyle().Width(col2W).PaddingLeft(colPadding).Foreground(lipgloss.Color("#EEE")).Render(skVal)
-			}
-			c3 = lipgloss.NewStyle().Width(col3W).PaddingLeft(colPadding).Foreground(lipgloss.Color("#DDD")).Render(otherVal)
-			rowContent = lipgloss.JoinHorizontal(lipgloss.Left, c1, c2, c3)
-			
-			rows = append(rows, listSelectedStyle.Width(leftWidth-2).Render(rowContent))
-		} else {
-			rows = append(rows, style.Width(leftWidth-2).Render(rowContent))
-		}
+		rowContent := lipgloss.JoinHorizontal(lipgloss.Left, cursor, c1, c2, c3)
+		rows = append(rows, style.Width(leftWidth).Render(rowContent))
 	}	
 	
 	// Use JoinVertical for the list

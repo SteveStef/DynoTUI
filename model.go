@@ -48,6 +48,7 @@ type model struct {
 	tableCursor int
 	itemCursor  int
 	modifiedItems map[int]bool
+	newItems      map[int]bool // Tracks items that were newly created but not yet saved/synced
 	spinner     spinner.Model
 	input       textinput.Model
 	inputMode   bool
@@ -89,6 +90,7 @@ func initialModel() model {
 		tables:        []Table{},
 		items:         []Item{},
 		modifiedItems: make(map[int]bool),
+		newItems:      make(map[int]bool),
 		spinner:       s,
 		input:         ti,
 		help:          h,
