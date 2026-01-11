@@ -235,11 +235,47 @@ func (m model) renderTableItems() string {
 
 	// --- LEFT PANE: Item List ---
 	
-	// Just use generic ID column since we don't know PK/SK
-	wPK := leftWidth - 2
+	// Column Calculations
+	// We want 3 columns: PK, SK, Info
+	// If SK is empty, maybe just PK and Info
 	
-	// List Header
-	tableHeader := itemHeaderStyle.Width(wPK).Render("ITEMS (Summary)")
+	colPadding := 1
+	availWidth := leftWidth - 4 // borders/padding
+	
+	var col1W, col2W, col3W int
+	
+	hasSK := selectedTable.SK != ""
+	
+	if hasSK {
+		col1W = int(float64(availWidth) * 0.3)
+		col2W = int(float64(availWidth) * 0.3)
+		col3W = availWidth - col1W - col2W - (colPadding * 2)
+	} else {
+		col1W = int(float64(availWidth) * 0.4)
+		col2W = 0
+		col3W = availWidth - col1W - (colPadding * 1)
+	}
+	
+	// Header Row
+	pkHeader := selectedTable.PK
+	if len(pkHeader) > col1W { pkHeader = pkHeader[:col1W] }
+	
+	skHeader := selectedTable.SK
+	if len(skHeader) > col2W { skHeader = skHeader[:col2W] }
+	
+	otherHeader := "Info"
+	
+	headerStyle := lipgloss.NewStyle().Foreground(textDim).Bold(true)
+	
+	h1 := headerStyle.Width(col1W).Render(pkHeader)
+	h2 := ""
+	if hasSK {
+		h2 = headerStyle.Width(col2W).PaddingLeft(colPadding).Render(skHeader)
+	}
+	h3 := headerStyle.Width(col3W).PaddingLeft(colPadding).Render(otherHeader)
+	
+	colHeader := lipgloss.JoinHorizontal(lipgloss.Left, h1, h2, h3)
+	listHeader := itemHeaderStyle.Width(leftWidth-2).Render(colHeader)
 
 	// Windowing Logic
 	availableHeight := m.height - 15 
@@ -262,46 +298,70 @@ func (m model) renderTableItems() string {
 	}
 
 	var rows []string
-		if len(m.items) == 0 {
-			rows = append(rows, itemRowStyle.Render("No items found or empty table."))
-		}
+	if len(m.items) == 0 {
+		rows = append(rows, itemRowStyle.Render("No items found."))
+	}
+	
 	for i := start; i < end; i++ {
 		item := m.items[i]
 		
-		// Grab first two keys to display as a summary
+		// Extract Values
+		pkVal := fmt.Sprintf("%v", item[selectedTable.PK])
+		skVal := ""
+		if hasSK {
+			skVal = fmt.Sprintf("%v", item[selectedTable.SK])
+		}
+		
+		// Find "Other" (first key that isn't PK or SK) - Deterministic
+		otherVal := ""
 		var keys []string
 		for k := range item {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys) // Consistent order
-		
-		summary := ""
-		
-		// Add modification indicator
-		if m.modifiedItems[i] {
-			summary += "[+] "
+		sort.Strings(keys) // Ensure stable order
+
+		for _, k := range keys {
+			if k != selectedTable.PK && k != selectedTable.SK {
+				otherVal = fmt.Sprintf("%s: %v", k, item[k])
+				break
+			}
 		}
-
-		if len(keys) > 0 { summary += fmt.Sprintf("%s=%v ", keys[0], item[keys[0]]) }
-		if len(keys) > 1 { summary += fmt.Sprintf("%s=%v", keys[1], item[keys[1]]) }
-		if summary == "" { summary = "{empty}" }
-
+		
 		// Truncate
-		if len(summary) > wPK-4 {
-			summary = summary[:wPK-4] + ".."
+		if len(pkVal) > col1W { pkVal = pkVal[:col1W-1] + "…" }
+		if len(skVal) > col2W { skVal = skVal[:col2W-1] + "…" }
+		if len(otherVal) > col3W { otherVal = otherVal[:col3W-1] + "…" }
+		
+		// Render Row
+		c1 := lipgloss.NewStyle().Width(col1W).Foreground(lipgloss.Color("252")).Render(pkVal)
+		c2 := ""
+		if hasSK {
+			c2 = lipgloss.NewStyle().Width(col2W).PaddingLeft(colPadding).Foreground(lipgloss.Color("246")).Render(skVal)
 		}
-
+		c3 := lipgloss.NewStyle().Width(col3W).PaddingLeft(colPadding).Foreground(textDim).Render(otherVal)
+		
+		rowContent := lipgloss.JoinHorizontal(lipgloss.Left, c1, c2, c3)
+		
+		// Highlight Selection
 		style := itemRowStyle
 		if m.itemCursor == i {
-			// Use the new global selected style
-			rows = append(rows, listSelectedStyle.Width(wPK).Render(summary))
+			// Override colors for selection
+			c1 = lipgloss.NewStyle().Width(col1W).Foreground(lipgloss.Color("#FFF")).Render(pkVal)
+			if hasSK {
+				c2 = lipgloss.NewStyle().Width(col2W).PaddingLeft(colPadding).Foreground(lipgloss.Color("#EEE")).Render(skVal)
+			}
+			c3 = lipgloss.NewStyle().Width(col3W).PaddingLeft(colPadding).Foreground(lipgloss.Color("#DDD")).Render(otherVal)
+			rowContent = lipgloss.JoinHorizontal(lipgloss.Left, c1, c2, c3)
+			
+			rows = append(rows, listSelectedStyle.Width(leftWidth-2).Render(rowContent))
 		} else {
-			rows = append(rows, style.Width(wPK).Render(summary))
+			rows = append(rows, style.Width(leftWidth-2).Render(rowContent))
 		}
 	}	
+	
 	// Use JoinVertical for the list
 	itemTable := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	leftPane := lipgloss.JoinVertical(lipgloss.Left, tableHeader, itemTable)
+	leftPane := lipgloss.JoinVertical(lipgloss.Left, listHeader, itemTable)
 	leftPane = lipgloss.NewStyle().Width(leftWidth).Render(leftPane)
 
 
