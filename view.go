@@ -15,7 +15,7 @@ func (m model) View() string {
 
 	switch m.view {
 	case viewLoading:
-		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
 			fmt.Sprintf("%s %s", m.spinner.View(), m.statusMessage),
 		)
 	case viewTableList:
@@ -27,7 +27,7 @@ func (m model) View() string {
 		warning := lipgloss.NewStyle().Foreground(warning).Render("This will overwrite the existing item.")
 		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to confirm, n/esc to cancel)")
 		
-		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
 			dialogBoxStyle.Render(
 				lipgloss.JoinVertical(lipgloss.Center,
 					question,
@@ -43,7 +43,7 @@ func (m model) View() string {
 		warning := lipgloss.NewStyle().Foreground(warning).Render("This action cannot be undone.")
 		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to confirm, n/esc to cancel)")
 		
-		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
 			dialogBoxStyle.Render(
 				lipgloss.JoinVertical(lipgloss.Center,
 					question,
@@ -73,13 +73,13 @@ func (m model) View() string {
 		
 		contentComponents = append(contentComponents, controls)
 
-		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
 			dialogBoxStyle.Render(
 				lipgloss.JoinVertical(lipgloss.Center, contentComponents...),
 			),
 		)
 	case viewError:
-		content = lipgloss.Place(m.width, m.height-3, lipgloss.Center, lipgloss.Center,
+		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center,
 				lipgloss.NewStyle().Foreground(warning).Bold(true).Render("ERROR"),
 				"",
@@ -90,25 +90,41 @@ func (m model) View() string {
 		)
 	}
 
-	// RENDER HELP
-	helpView := m.help.View(m.keys)
-
-	// ALWAYS RENDER COMMAND BAR
-	cmdBar := m.input.View()
-	if !m.inputMode {
-		cmdBar = lipgloss.NewStyle().Foreground(subtle).Render("Press '/' to type command...")
+	// FOOTER LAYOUT
+	// 1. Command Bar (Input) or Status Hint
+	var bottomBar string
+	if m.inputMode {
+		bottomBar = inputStyle.Width(m.width - 2).Render(m.input.View())
+	} else {
+		// Render a nice status bar
+		// Mode | Context | Help Hint
+		modeStr := " EXPLORE "
+		if m.view == viewTableItems {
+			modeStr = " BROWSE "
+		}
+		
+		mode := statusKeyStyle.Render(modeStr)
+		
+		accountID := m.AccountId
+		if accountID == "" { accountID = "Loading..." }
+		
+		contextStr := fmt.Sprintf("Account: %s | Region: %s", accountID, m.Region)
+		if len(m.tables) > 0 && m.tableCursor < len(m.tables) {
+			t := m.tables[m.tableCursor]
+			contextStr += fmt.Sprintf(" | Table: %s", t.Name)
+		}
+		
+		context := statusValStyle.Width(m.width - lipgloss.Width(mode)).Render(contextStr)
+		bottomBar = lipgloss.JoinHorizontal(lipgloss.Top, mode, context)
 	}
-	cmdBarBox := inputStyle.Width(m.width - 2).Render(cmdBar)
 
 	// Calculate Gap to push bar to bottom
-	contentHeight := lipgloss.Height(content) + lipgloss.Height(helpView) + lipgloss.Height(cmdBarBox) + 1
+	contentHeight := lipgloss.Height(content) + lipgloss.Height(bottomBar)
 	gapH := m.height - contentHeight
-	gap := ""
-	if gapH > 0 {
-		gap = strings.Repeat("\n", gapH)
-	}
+	if gapH < 0 { gapH = 0 }
+	gap := strings.Repeat("\n", gapH)
 
-	return lipgloss.JoinVertical(lipgloss.Left, content, gap, "  "+helpView, cmdBarBox)
+	return lipgloss.JoinVertical(lipgloss.Left, content, gap, bottomBar)
 }
 
 func (m model) renderHeader(title string) string {
@@ -122,23 +138,23 @@ func (m model) renderHeader(title string) string {
 
     // Left part
     left := lipgloss.NewStyle().
-        Background(highlight).
-        Foreground(lipgloss.Color("#FFFDF5")).
+        Background(primary).
+        Foreground(textLight).
         Bold(true).
         Padding(0, 1).
         Render(title)
 
     // Right part
     right := lipgloss.NewStyle().
-        Background(highlight).
-        Foreground(lipgloss.Color("#FFFDF5")).
+        Background(primary).
+        Foreground(textLight).
         Padding(0, 1).
         Render(infoText)
         
     // Spacer
     w := m.width - lipgloss.Width(left) - lipgloss.Width(right)
     if w < 0 { w = 0 }
-    spacer := lipgloss.NewStyle().Background(highlight).Width(w).Render("")
+    spacer := lipgloss.NewStyle().Background(primary).Width(w).Render("")
     
     return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
 }
@@ -154,9 +170,11 @@ func (m model) renderTableList() string {
 	for i, t := range m.tables {
 		str := fmt.Sprintf("  %s", t.Name)
 		if m.tableCursor == i {
-			listItems = append(listItems, listSelectedStyle.Width(leftWidth-2).Render(str))
+			// Selected Item
+			listItems = append(listItems, listSelectedStyle.Width(leftWidth).Render(str))
 		} else {
-			listItems = append(listItems, listItemStyle.Width(leftWidth-2).Render(str))
+			// Normal Item
+			listItems = append(listItems, listItemStyle.Width(leftWidth).Render(str))
 		}
 	}
 	leftPane := lipgloss.JoinVertical(lipgloss.Left, listItems...)
@@ -194,7 +212,7 @@ func (m model) renderTableList() string {
 	}
 
 	details := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Foreground(accent).Render("SCHEMA MAP"),
+		lipgloss.NewStyle().Bold(true).Foreground(secondary).Render("SCHEMA MAP"),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(tree),
 	)
@@ -218,7 +236,7 @@ func (m model) renderTableItems() string {
 	// --- LEFT PANE: Item List ---
 	
 	// Just use generic ID column since we don't know PK/SK
-	wPK := leftWidth - 4
+	wPK := leftWidth - 2
 	
 	// List Header
 	tableHeader := itemHeaderStyle.Width(wPK).Render("ITEMS (Summary)")
@@ -269,18 +287,18 @@ func (m model) renderTableItems() string {
 		if summary == "" { summary = "{empty}" }
 
 		// Truncate
-		if len(summary) > wPK-2 {
-			summary = summary[:wPK-2] + ".."
+		if len(summary) > wPK-4 {
+			summary = summary[:wPK-4] + ".."
 		}
 
 		style := itemRowStyle
-				if m.itemCursor == i {
-					style = style.Copy().Background(highlight).Foreground(lipgloss.Color("#FFF"))
-				}
-				
-			
-rows = append(rows, style.Width(wPK).Render(summary))
-			}	
+		if m.itemCursor == i {
+			// Use the new global selected style
+			rows = append(rows, listSelectedStyle.Width(wPK).Render(summary))
+		} else {
+			rows = append(rows, style.Width(wPK).Render(summary))
+		}
+	}	
 	// Use JoinVertical for the list
 	itemTable := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	leftPane := lipgloss.JoinVertical(lipgloss.Left, tableHeader, itemTable)
@@ -288,9 +306,9 @@ rows = append(rows, style.Width(wPK).Render(summary))
 
 
 	// --- RIGHT PANE: JSON Inspector ---
-	detailBorderColor := subtle
+	var detailBorderColor lipgloss.TerminalColor = subtle
 	if m.activePane == 1 {
-		detailBorderColor = highlight
+		detailBorderColor = primary // Use primary color for focus
 	}
 	
 	detailTitle := "ITEM JSON"
@@ -304,7 +322,7 @@ rows = append(rows, style.Width(wPK).Render(summary))
 		Width(rightWidth).
 		Padding(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, 
-			lipgloss.NewStyle().Foreground(accent).Bold(true).Render(detailTitle), 
+			lipgloss.NewStyle().Foreground(secondary).Bold(true).Render(detailTitle), 
 			"\n",
 			m.viewport.View(),
 		))
@@ -324,8 +342,8 @@ func highlightJSON(s string) string {
 			key := parts[0]
 			rawVal := strings.TrimSpace(parts[1])
 			
-			// Color Key (Purple)
-			key = lipgloss.NewStyle().Foreground(lipgloss.Color("#874BFD")).Render(key)
+			// Color Key (Purple/Primary)
+			key = lipgloss.NewStyle().Foreground(primary).Render(key)
 			
 			// Detect Type & Color Value
 			var valColor lipgloss.Color
@@ -336,14 +354,14 @@ func highlightJSON(s string) string {
 			}
 
 			if strings.HasPrefix(val, "\"") {
-				// String
-				valColor = lipgloss.Color("#43BF6D") // Green
+				// String - Green (Secondary)
+				valColor = secondary
 			} else if val == "true" || val == "false" {
-				// Boolean
-				valColor = lipgloss.Color("#F25D94") // Pink
+				// Boolean - Red/Pink (Alert)
+				valColor = alert
 			} else if strings.ContainsAny(val, "0123456789") {
-				// Number
-				valColor = lipgloss.Color("#F5C25D") // Yellow
+				// Number - Yellow (Custom)
+				valColor = lipgloss.Color("#F5C25D")
 			} else {
 				// Null or Object
 				valColor = lipgloss.Color("250")

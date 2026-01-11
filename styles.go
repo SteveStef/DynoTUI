@@ -7,16 +7,25 @@ import (
 // --- Styles ---
 
 var (
-	// Theme
+	// Theme Palette
+	// Dark background compatible colors
+	primary    = lipgloss.Color("#7D56F4") // Purple/Indigo
+	secondary  = lipgloss.Color("#04B575") // Teal/Green
+	alert      = lipgloss.Color("#FF5F87") // Red/Pink
+	textLight  = lipgloss.Color("#E4E4E4") // Off-white
+	textDim    = lipgloss.Color("#626262") // Gray
+	bgHighlight = lipgloss.Color("#3C3836") // Dark Gray for selection
+
+	// Mapping to existing logic
 	subtle    = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
 	highlight = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	accent    = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
-	warning   = lipgloss.AdaptiveColor{Light: "#F25D94", Dark: "#F25D94"}
+	accent    = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#04B575"}
+	warning   = lipgloss.AdaptiveColor{Light: "#F25D94", Dark: "#FF5F87"}
 
 	// Global Headers
 	headerStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFDF5")).
-		Background(highlight).
+		Foreground(textLight).
+		Background(primary).
 		Padding(0, 1).
 		Bold(true)
 
@@ -25,16 +34,24 @@ var (
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderBottom(true).
 		BorderForeground(subtle).
-		Foreground(highlight).
-		Bold(true)
+		Foreground(secondary).
+		Bold(true).
+		PaddingLeft(1)
 
-	listItemStyle = lipgloss.NewStyle().PaddingLeft(1).Foreground(lipgloss.Color("241"))
-	listSelectedStyle = lipgloss.NewStyle().PaddingLeft(1).Foreground(highlight).Bold(true).
-		BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(highlight)
+	listItemStyle = lipgloss.NewStyle().
+		PaddingLeft(1).
+		Foreground(lipgloss.Color("252")) // Standard text
+
+	listSelectedStyle = lipgloss.NewStyle().
+		PaddingLeft(1).
+		Foreground(lipgloss.Color("#FFF")).
+		Background(primary).
+		Bold(true).
+		BorderLeft(false) // Removed border in favor of background
 
 	// Item View Styles
 	itemHeaderStyle = lipgloss.NewStyle().
-		Foreground(accent).
+		Foreground(secondary).
 		Bold(true).
 		Padding(0, 1).
 		BorderBottom(true).
@@ -50,22 +67,39 @@ var (
 		BorderForeground(subtle).
 		Padding(0, 1)
 	
-	labelStyle = lipgloss.NewStyle().Foreground(subtle).Width(12)
-	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	labelStyle = lipgloss.NewStyle().Foreground(textDim).Width(12)
+	valueStyle = lipgloss.NewStyle().Foreground(textLight)
 
 	// Command Bar
 	inputStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(highlight).
+		BorderForeground(primary).
 		Padding(0, 1)
+	
+	placeholderStyle = lipgloss.NewStyle().Foreground(textDim)
 
 	// Dialog
 	dialogBoxStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(warning).
-		Padding(1, 0).
+		BorderForeground(alert).
+		Padding(1, 2).
 		BorderTop(true).
 		BorderLeft(true).
 		BorderRight(true).
 		BorderBottom(true)
+
+	// Status Bar
+	statusBarStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFF")).
+		Background(lipgloss.AdaptiveColor{Light: "#355C7D", Dark: "#2A2A2A"})
+	
+	statusKeyStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFF")).
+		Background(primary).
+		Padding(0, 1)
+
+	statusValStyle = lipgloss.NewStyle().
+		Foreground(textLight).
+		Background(lipgloss.AdaptiveColor{Light: "#355C7D", Dark: "#2A2A2A"}).
+		Padding(0, 1)
 )

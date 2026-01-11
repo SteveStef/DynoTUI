@@ -77,6 +77,12 @@ func initialModel() model {
 	ti.CharLimit = 156
 	ti.Width = 50
 
+	h := help.New()
+	h.Styles.ShortKey.Foreground(lipgloss.Color("#7D56F4")) // Primary
+	h.Styles.ShortDesc.Foreground(lipgloss.Color("#626262")) // TextDim
+	h.Styles.FullKey.Foreground(lipgloss.Color("#7D56F4"))
+	h.Styles.FullDesc.Foreground(lipgloss.Color("#626262"))
+
 	return model{
 		view:          viewLoading,
 		loading:       true,
@@ -85,7 +91,7 @@ func initialModel() model {
 		modifiedItems: make(map[int]bool),
 		spinner:       s,
 		input:         ti,
-		help:          help.New(),
+		help:          h,
 		keys:          keys,
 		viewport:      viewport.New(0, 0),
 		statusMessage: "Loading tables from AWS...",
