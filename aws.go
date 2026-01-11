@@ -52,42 +52,53 @@ func BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]inter
 
 	client := dynamodb.NewFromConfig(cfg)
 	
-	var batchInputs []types.BatchStatementRequest
-	for _, sql := range statements {
-		batchInputs = append(batchInputs, types.BatchStatementRequest{
-			Statement: aws.String(sql),
-		})
-	}
-
-	// DynamoDB BatchExecuteStatement allows up to 25 statements
-	if len(batchInputs) > 25 {
-		return nil, fmt.Errorf("too many statements for batch execution (max 25)")
-	}
-
-	result, err := client.BatchExecuteStatement(ctx, &dynamodb.BatchExecuteStatementInput{
-		Statements: batchInputs,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("batch execution failed: %w", err)
-	}
-
-	// Aggregate all responses
 	var allItems []map[string]interface{}
 	var errorMsgs []string
 
-	for i, resp := range result.Responses {
-		if resp.Error != nil {
-			msg := fmt.Sprintf("Statement %d failed: %s - %s", i+1, resp.Error.Code, *resp.Error.Message)
-			log.Println(msg)
-			errorMsgs = append(errorMsgs, msg)
-			continue
+	// Chunk size for BatchExecuteStatement is 25
+	chunkSize := 25
+
+	for i := 0; i < len(statements); i += chunkSize {
+		end := i + chunkSize
+		if end > len(statements) {
+			end = len(statements)
 		}
-		
-		if resp.Item != nil {
-			var item map[string]interface{}
-			if err := attributevalue.UnmarshalMap(resp.Item, &item); err == nil {
-				allItems = append(allItems, item)
+
+		chunk := statements[i:end]
+		var batchInputs []types.BatchStatementRequest
+		for _, sql := range chunk {
+			batchInputs = append(batchInputs, types.BatchStatementRequest{
+				Statement: aws.String(sql),
+			})
+		}
+
+		result, err := client.BatchExecuteStatement(ctx, &dynamodb.BatchExecuteStatementInput{
+			Statements: batchInputs,
+		})
+
+		if err != nil {
+			// If the entire batch fails (e.g. auth error), record it and maybe stop?
+			// We'll record and continue to try other batches or stop? 
+			// Usually system errors mean we should stop.
+			return allItems, fmt.Errorf("batch execution failed at chunk %d-%d: %w", i, end, err)
+		}
+
+		// Process responses for this chunk
+		for j, resp := range result.Responses {
+			if resp.Error != nil {
+				// Global index of the statement
+				stmtIdx := i + j + 1
+				msg := fmt.Sprintf("Statement %d failed: %s - %s", stmtIdx, resp.Error.Code, *resp.Error.Message)
+				log.Println(msg)
+				errorMsgs = append(errorMsgs, msg)
+				continue
+			}
+			
+			if resp.Item != nil {
+				var item map[string]interface{}
+				if err := attributevalue.UnmarshalMap(resp.Item, &item); err == nil {
+					allItems = append(allItems, item)
+				}
 			}
 		}
 	}

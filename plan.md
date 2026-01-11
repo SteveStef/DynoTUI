@@ -1,40 +1,94 @@
-# Plan: Automated Bulk Mutations for DynoTUI
+LLMResult Rules
+Root Structure
+{
+  "mode": "sql" | "plan",
+  "statements": [ "<PartiQL statement>" ],
+  "plan": { ... } | null
+}
 
-## Context
-DynamoDB PartiQL does not support bulk `UPDATE` or `DELETE` operations on non-key attributes. It requires the full Primary Key (Partition Key and Sort Key) for every mutation.
+Mode Rules
+mode	Allowed content
+sql	statements MUST contain at least one valid PartiQL statement. plan MUST be null.
+plan	statements MUST be an empty array []. plan MUST NOT be null.
+statements Rules
 
-## Objective
-Implement a "Fetch-then-Mutate" pattern that allows users to perform natural language bulk actions (e.g., "Delete all items where status is 'expired'") seamlessly.
+Used only when mode = "sql".
 
-## Proposed Workflow
+Must contain only safe, key-bounded PartiQL statements.
 
-### 1. Prompt Enhancement (`bedrock.go`)
-Update the LLM prompt to handle "Ambiguous Mutations":
-- **Constraint:** If a user requests an `UPDATE` or `DELETE` without providing specific Primary Keys (both PK and SK if applicable), or uses non-key attributes in the `WHERE` clause, the LLM should not attempt a direct mutation.
-- **Action:** The LLM should instead generate a `SELECT *` query targeting those specific items.
-- **Metadata:** Prepend a specific tag or comment to the query, e.g., `-- BULK_DISCOVERY_FOR: DELETE`.
+Each statement must be independently executable by ExecuteStatement.
 
-### 2. TUI Logic Update (`update.go`)
-Modify the `sqlGeneratedMsg` and execution handlers:
-- **Detection:** If the generated SQL is a `SELECT` but carries the `-- BULK_DISCOVERY` metadata:
-    - Display a special confirmation: "This action requires two steps. First, we will find the matching items. Continue?"
-- **Execution (Step 1):** Execute the `SELECT` query and store the results in `m.items`.
-- **Automatic Step 2:** After the items are loaded, display a "Bulk Action" overlay:
-    - "Found X items matching your criteria. Apply [DELETE/UPDATE] to all?"
-- **Batching:** If the user confirms, generate individual PartiQL statements for each item. 
-    - **CRITICAL:** Every statement MUST include the equality match for both the Partition Key AND the Sort Key (if the table has one). Failure to include the SK on a table that has one will result in a ValidationException.
-- **Batch Execution:** Execute them using `BatchExecuteStatement` in chunks of 25.
+No statement in statements may perform a multi-item mutation without full primary key equality.
 
-### 3. Implementation Details
+plan Object Rules
+plan Structure
+{
+  "table": "<table name>",
+  "operation": "select" | "scan_then_write",
+  "read": { ... },
+  "write": null | { ... },
+  "safety": { ... }
+}
 
-#### Step A: Multi-Statement Execution
-- Refactor `BatchSqlQuery` in `aws.go` to handle larger batches by chunking requests into groups of 25 (DynamoDB's limit).
+operation Rules
+operation	meaning
+select	Read-only operation. May involve Query or Scan.
+scan_then_write	Multi-item mutation. Requires read + write.
+read Rules
+{
+  "partiql": "<SELECT statement>",
+  "requires_scan": true | false,
+  "index": "<GSI name>" | null,
+  "projection": ["<PK>", "<SK>"] | ["*"]
+}
 
-#### Step B: Progress UI
-- Add a progress bar or counter to `view.go` to show the status of bulk operations (e.g., "Deleting 45/100...").
 
-## Tasks for Execution
-- [ ] Update `InvokeBedrock` prompt in `bedrock.go` with "Discovery Query" logic.
-- [ ] Update `model` struct in `model.go` to track `bulkActionPending` state.
-- [ ] Implement `ApplyBulkActionCmd` in `commands.go` to iterate through `m.items` and generate/execute batch mutations.
-- [ ] Add `viewBulkConfirmation` to `view.go`.
+partiql MUST be a SELECT.
+
+projection MUST include the full primary key (PK, and SK if the table has one) unless projection = ["*"].
+
+If the query does not use a partition key or GSI partition key, requires_scan MUST be true.
+
+write Rules
+
+Must be null when operation = "select".
+
+Must NOT be null when operation = "scan_then_write".
+
+{
+  "action": "insert" | "update" | "delete",
+  "per_item": {
+    "partiql_template":
+      "Key-bounded PartiQL with {{PK}} and {{SK}} placeholders"
+  }
+}
+
+
+partiql_template MUST include {{PK}}.
+
+If the table has a sort key, {{SK}} MUST also be present.
+
+The template MUST uniquely target exactly one item.
+
+safety Rules
+{
+  "needs_confirmation": true | false,
+  "reason": "none" | "full_table_scan" | "multi_item_write"
+}
+
+
+needs_confirmation MUST be true when:
+
+read.requires_scan = true, or
+
+operation = "scan_then_write".
+
+Hard Invariants
+Condition	Enforcement
+mode = "plan"	statements MUST be empty
+mode = "sql"	statements MUST NOT be empty
+operation = "scan_then_write"	write MUST NOT be null
+Missing PK or SK in mutation	MUST be rejected
+Multi-item UPDATE / DELETE without keys	MUST use scan_then_write
+
+These rules guarantee that DynoTUI never executes unsafe DynamoDB operations.

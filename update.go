@@ -273,6 +273,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewError
 		} else {
 			m.llmResult = msg.result
+			
+			if m.llmResult.Mode == "refusal" {
+				m.err = fmt.Errorf("%s", m.llmResult.RefusalReason)
+				m.view = viewError
+				return m, nil
+			}
+
 			m.isScanWarning = false
 
 			if m.llmResult.Mode == "sql" {
@@ -303,9 +310,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingPlanItems[i] = Item(item)
 		}
 		
+		log.Printf("Bulk Discovery: Found %d items", len(m.pendingPlanItems))
+		
 		if len(m.pendingPlanItems) == 0 {
-			m.statusMessage = "No matching items found."
-			m.view = viewTableItems // Or back to list?
+			m.err = fmt.Errorf("No matching items found for bulk action.")
+			m.view = viewError
 			return m, nil
 		}
 
@@ -462,6 +471,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					hasSK := (t.SK != "")
 					
 					tpl := m.llmResult.Plan.Write.PerItem.PartiqlTemplate
+
+					// Client-side Safety Check for Illegal Placeholders
+					// If template contains "{{" but it's not PK or SK, reject it.
+					// We iterate to find all occurrences
+					checkTpl := tpl
+					checkTpl = strings.ReplaceAll(checkTpl, "{{PK}}", "")
+					checkTpl = strings.ReplaceAll(checkTpl, "{{SK}}", "")
+					if strings.Contains(checkTpl, "{{") {
+						return errMsg(fmt.Errorf("Safety Error: The AI generated an invalid template with illegal placeholders. This operation has been blocked."))
+					}
 					
 					var queries []string
 					for _, item := range m.pendingPlanItems {
@@ -485,21 +504,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						queries = append(queries, q)
 					}
 					
-					// Chunking handled by BatchSqlQuery? No, BatchExecuteStatement has limit of 25.
-					// My BatchSqlQuery implementation in aws.go currently errors if > 25.
-					// I need to chunk it here or update BatchSqlQuery.
-					// For now, let's chunk here to be safe.
-					
-					chunkSize := 25
-					for i := 0; i < len(queries); i += chunkSize {
-						end := i + chunkSize
-						if end > len(queries) { end = len(queries) }
-						
-						chunk := queries[i:end]
-						_, err := BatchSqlQuery(ctx, chunk)
-						if err != nil {
-							return errMsg(err)
-						}
+					// Chunking handled by BatchSqlQuery (aws.go) which now supports > 25 items by internal chunking.
+					_, err := BatchSqlQuery(ctx, queries)
+					if err != nil {
+						return errMsg(err)
 					}
 					
 					// Re-scan

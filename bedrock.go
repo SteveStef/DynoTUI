@@ -40,9 +40,10 @@ type NovaResponse struct {
 }
 
 type LLMResult struct {
-	Mode       string     `json:"mode"`
-	Statements []string   `json:"statements"`
-	Plan       *PlanBlock `json:"plan"`
+	Mode          string     `json:"mode"`
+	Statements    []string   `json:"statements"`
+	Plan          *PlanBlock `json:"plan"`
+	RefusalReason string     `json:"refusal_reason"`
 }
 
 type PlanBlock struct {
@@ -92,28 +93,28 @@ func InvokeBedrock(ctx context.Context, question string, table Table) (LLMResult
 	prompt := fmt.Sprintf(`
 You are a DynamoDB expert. Your job is to produce a SAFE execution plan for DynamoDB.
 
+SYSTEM CAPABILITIES (CRITICAL CONTEXT)
+This tool performs a "Fetch-then-Mutate" pattern.
+1. READ: It runs a SELECT query to find items.
+2. WRITE: It applies a *static* PartiQL template to every item found.
+It CANNOT generate unique values (like random strings, UUIDs, or timestamps) for each item client-side.
+Therefore, any request for "random", "unique", or "dynamic" values per item is IMPOSSIBLE and MUST be refused.
+
 Return EXACTLY ONE valid JSON object and nothing else (no markdown, no backticks, no explanations).
 
 INPUTS
 Schema (includes table name, PK/SK, GSIs):
 %s
+NOTE: The schema above only lists keys and indexes. The table contains other attributes not listed here. Do not refuse a query just because an attribute is not in this schema.
 
 User request:
 %s
 
-STRICT DYNAMODB RULES
-- UPDATE and DELETE must uniquely identify items using the FULL primary key.
-  - PK-only table: WHERE must include PK equality.
-  - PK+SK table: WHERE must include BOTH PK and SK equality.
-- If the user asks to UPDATE or DELETE multiple items but does NOT provide keys,
-  you MUST return operation="scan_then_write".
-- If a filter does not use PK or a GSI partition key, set read.requires_scan=true.
-- If read.requires_scan=true, set safety.needs_confirmation=true and safety.reason="full_table_scan".
-
 OUTPUT JSON SCHEMA
 {
-  "mode": "sql" | "plan",
+  "mode": "sql" | "plan" | "refusal",
   "statements": ["<PartiQL>"],
+  "refusal_reason": "<string if mode=refusal>",
 
   "plan": {
     "table": "<table name>",
@@ -138,7 +139,42 @@ OUTPUT JSON SCHEMA
   }
 }
 
+EXAMPLES
+CORRECT INSERT: INSERT INTO "Users" VALUE {'id': 1, 'name': 'bob'}
+INCORRECT INSERT: INSERT INTO "Users" VALUE {'id': {{id}}, 'name': {{name}}}
+
+INCORRECT UPDATE (Wrong Placeholders): "partiql_template": "UPDATE \"Users\" SET \"status\"='active' WHERE \"id\"={{id}}"
+CORRECT UPDATE: "partiql_template": "UPDATE \"Users\" SET \"status\"='active' WHERE \"id\"={{PK}}"
+
+REFUSAL EXAMPLES
+Request: "What is the average age of users?" -> {"mode": "refusal", "refusal_reason": "Aggregations like AVG are not supported."}
+Request: "Update all users to have random passwords" -> {"mode": "refusal", "refusal_reason": "Dynamic value generation (random) is not supported for updates."}
+Request: "Double the points for everyone" -> {"mode": "refusal", "refusal_reason": "Math operations on attributes are not supported."}
+Request: "Set fullName to firstName + lastName" -> {"mode": "refusal", "refusal_reason": "String concatenation is not supported."}
+
+STRICT DYNAMODB RULES
+- UPDATE and DELETE must uniquely identify items using the FULL primary key.
+  - PK-only table: WHERE must include PK equality.
+  - PK+SK table: WHERE must include BOTH PK and SK equality.
+- If the user asks to UPDATE or DELETE multiple items but does NOT provide keys,
+  you MUST return operation="scan_then_write".
+- If a filter does not use PK or a GSI partition key, set read.requires_scan=true. FULL TABLE SCANS ARE ALLOWED. Do not refuse.
+- If read.requires_scan=true, set safety.needs_confirmation=true and safety.reason="full_table_scan".
+
+LIMITATIONS (REFUSAL CRITERIA)
+If the user requests any of the following, return mode="refusal" with a helpful refusal_reason:
+1. Data Transformation: Operations like UPPER(), LOWER(), Concatenation, or math on attributes (e.g. "Double the price").
+2. Aggregations: COUNT, AVG, SUM, MAX, MIN, GROUP BY.
+3. DDL/Schema: CREATE, ALTER, DROP TABLE/INDEX.
+4. Joins/Unions: Operations involving multiple tables.
+5. Dynamic Value Generation: Requests asking to generate random values, UUIDs, or timestamps for EACH item during an update (e.g., "Set random password for everyone").
+NOTE: Inefficient queries (Full Table Scans) are ALLOWED. Do not refuse them.
+
 DECISION RULES
+- If mode="refusal", set other fields to null/empty.
+- CRITICAL: If the user asks for random/dynamic values (e.g. "set random password"), return mode="refusal". Do NOT attempt to use {{random}} placeholders.
+- For INSERT operations (creating new items), ALWAYS use mode="sql" with fully specified statements. NEVER use a plan or templates for INSERT.
+- When mode='sql', statements MUST NOT contain ANY placeholders like {{...}}. You must generate actual values (random or specific).
 - If the request can be satisfied with a SAFE single-step key-bounded PartiQL,
   return mode="sql" and populate "statements". Set "plan" to null.
 - Otherwise return mode="plan", set "statements" to [],
@@ -151,6 +187,7 @@ PARTIQL RULES
 - Single quotes for string values.
 - INSERT: INSERT INTO "Table" VALUE {...}
 - Missing attribute: "attr" IS MISSING
+- partiql_template must ONLY contain {{PK}} and {{SK}} placeholders. Do NOT use placeholders like {{id}}, {{random}}, etc.
 - contains("attr",'x'), begins_with("attr",'A')
 
 Return ONLY the JSON object.
@@ -205,10 +242,27 @@ Return ONLY the JSON object.
 	rawText = strings.TrimSuffix(rawText, "```")
 	rawText = strings.TrimSpace(rawText)
 
+	log.Printf("Raw LLM Response: %s", rawText)
+
 	var result LLMResult
 	if err := json.Unmarshal([]byte(rawText), &result); err != nil {
 		return LLMResult{}, fmt.Errorf("LLM JSON parse failed: %w; raw=%q", err, rawText)
 	}
+
+	log.Printf("Parsed Statements (Before Cleaning): %q", result.Statements)
+
+	// Filter empty statements to avoid DynamoDB ValidationException
+	if len(result.Statements) > 0 {
+		var cleanStmts []string
+		for _, s := range result.Statements {
+			if strings.TrimSpace(s) != "" {
+				cleanStmts = append(cleanStmts, s)
+			}
+		}
+		result.Statements = cleanStmts
+	}
+	
+	log.Printf("Final Statements: %q", result.Statements)
 
 	// validations
 	if result.Mode == "sql" && len(result.Statements) == 0 {
@@ -251,6 +305,10 @@ func FormatPartiQLValue(v any) (string, error) {
 }
 
 func SubstituteKeys(tpl string, pkVal any, skVal any, hasSK bool) (string, error) {
+	if !strings.Contains(tpl, "{{PK}}") {
+		return "", fmt.Errorf("template missing {{PK}} placeholder")
+	}
+
 	pkStr, err := FormatPartiQLValue(pkVal)
 	if err != nil {
 		return "", fmt.Errorf("format PK: %w", err)
@@ -258,6 +316,9 @@ func SubstituteKeys(tpl string, pkVal any, skVal any, hasSK bool) (string, error
 	out := strings.ReplaceAll(tpl, "{{PK}}", pkStr)
 
 	if hasSK {
+		if !strings.Contains(tpl, "{{SK}}") {
+			return "", fmt.Errorf("template missing {{SK}} placeholder for table with sort key")
+		}
 		skStr, err := FormatPartiQLValue(skVal)
 		if err != nil {
 			return "", fmt.Errorf("format SK: %w", err)
