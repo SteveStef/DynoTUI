@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	// "time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -73,9 +74,13 @@ func BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]inter
 
 	// Aggregate all responses
 	var allItems []map[string]interface{}
+	var errorMsgs []string
+
 	for i, resp := range result.Responses {
 		if resp.Error != nil {
-			log.Printf("Batch statement %d error: %s - %s", i, resp.Error.Code, *resp.Error.Message)
+			msg := fmt.Sprintf("Statement %d failed: %s - %s", i+1, resp.Error.Code, *resp.Error.Message)
+			log.Println(msg)
+			errorMsgs = append(errorMsgs, msg)
 			continue
 		}
 		
@@ -85,6 +90,10 @@ func BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]inter
 				allItems = append(allItems, item)
 			}
 		}
+	}
+
+	if len(errorMsgs) > 0 {
+		return allItems, fmt.Errorf("Batch execution encountered %d errors:\n%s", len(errorMsgs), strings.Join(errorMsgs, "\n"))
 	}
 
 	return allItems, nil
@@ -127,7 +136,9 @@ func ListAllTables(ctx context.Context) ([]string, error) {
 type TableDetails struct {
 	Name      string
 	PK        string
+	PKType    string
 	SK        string
+	SKType    string
 	Region    string
 	ItemCount int64
 	GSIs      []string
@@ -183,12 +194,24 @@ func ListTablesWithDetails(ctx context.Context) ([]TableDetails, string, string,
 			details.ItemCount = *t.ItemCount
 		}
 
+		// Build map of attribute types
+		attrTypes := make(map[string]string)
+		for _, ad := range t.AttributeDefinitions {
+			attrTypes[*ad.AttributeName] = string(ad.AttributeType)
+		}
+
 		// Parse Key Schema
 		for _, k := range t.KeySchema {
 			if k.KeyType == types.KeyTypeHash {
 				details.PK = *k.AttributeName
+				if t, ok := attrTypes[details.PK]; ok {
+					details.PKType = t
+				}
 			} else if k.KeyType == types.KeyTypeRange {
 				details.SK = *k.AttributeName
+				if t, ok := attrTypes[details.SK]; ok {
+					details.SKType = t
+				}
 			}
 		}
 

@@ -192,9 +192,9 @@ func (m model) renderTableList() string {
 	// Schema Map Visualizer
 	tree := fmt.Sprintf("Table: %s (%s)\n", selected.Name, selected.Status)
 	tree += fmt.Sprintf("Items: %d\n", selected.ItemCount)
-	tree += fmt.Sprintf("├── PK: %s (HASH)\n", selected.PK)
+	tree += fmt.Sprintf("├── PK: %s (%s, HASH)\n", selected.PK, selected.PKType)
 	if selected.SK != "" {
-		tree += fmt.Sprintf("└── SK: %s (RANGE)\n", selected.SK)
+		tree += fmt.Sprintf("└── SK: %s (%s, RANGE)\n", selected.SK, selected.SKType)
 	} else {
 		tree += "└── (No Sort Key)\n"
 	}
@@ -251,10 +251,15 @@ func (m model) renderHelpBox(width int) string {
 
 	title := lipgloss.NewStyle().Foreground(secondary).Bold(true).Render("HELP & SHORTCUTS")
 	desc := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render("AI-powered DynamoDB Explorer")
+	
+	aboutText := "DynoTUI allows you to explore and manage your DynamoDB tables with ease. It leverages AI to let you query your data using natural language, making complex PartiQL queries accessible to everyone."
+	about := lipgloss.NewStyle().Foreground(textDim).Width(width - 4).Render(aboutText)
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		title,
 		desc,
+		"",
+		about,
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ GLOBAL ]"),
 		makeRow("/", "AI Query", "r", "Refresh"),

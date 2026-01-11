@@ -49,7 +49,9 @@ func InvokeBedrock(ctx context.Context, question string, table Table) ([]string,
 	client := bedrockruntime.NewFromConfig(cfg)
 
 	// Construct schema description
-	schemaDesc := fmt.Sprintf("Table Name: %s\nPartition Key: %s\nSort Key: %s\n", table.Name, table.PK, table.SK)
+	schemaDesc := fmt.Sprintf("Table Name: %s\nPartition Key: %s (Type: %s)\nSort Key: %s (Type: %s)\n", 
+		table.Name, table.PK, table.PKType, table.SK, table.SKType)
+	
 	if len(table.GSIs) > 0 {
 		schemaDesc += fmt.Sprintf("Global Secondary Indexes: %v\n", table.GSIs)
 	}
@@ -88,7 +90,7 @@ Rules:
 			MaxNewTokens int     `json:"max_new_tokens"`
 			Temperature  float64 `json:"temperature"`
 		}{
-			MaxNewTokens: 300, // Increased for multiple statements
+			MaxNewTokens: 1000, // Increased for larger batches of statements
 			Temperature:  0,
 		},
 	}

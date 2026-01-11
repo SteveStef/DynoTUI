@@ -29,7 +29,9 @@ const (
 type Table struct {
 	Name      string
 	PK        string
+	PKType    string
 	SK        string
+	SKType    string
 	Region    string
 	ItemCount int64
 	GSIs      []string

@@ -77,7 +77,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tables[i] = Table{
 				Name:      t.Name,
 				PK:        t.PK,
+				PKType:    t.PKType,
 				SK:        t.SK,
+				SKType:    t.SKType,
 				Region:    t.Region,
 				ItemCount: t.ItemCount,
 				GSIs:      t.GSIs,
