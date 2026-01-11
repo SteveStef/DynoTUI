@@ -216,10 +216,61 @@ func (m model) renderTableList() string {
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(tree),
 	)
-	rightPane := detailStyle.Width(rightWidth).Height(15).Render(details)
+	schemaBox := detailStyle.Width(rightWidth).Height(13).Render(details)
+
+	// Help Box
+	helpBox := m.renderHelpBox(rightWidth)
+
+	rightPane := lipgloss.JoinVertical(lipgloss.Left, schemaBox, "\n", helpBox)
 
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 	return lipgloss.JoinVertical(lipgloss.Left, header, "\n", mainContent)
+}
+
+func (m model) renderHelpBox(width int) string {
+	keyStyle := lipgloss.NewStyle().Foreground(primary).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(textDim)
+	
+	row := func(k, d string) string {
+		// Padding logic
+		kStr := keyStyle.Render(fmt.Sprintf("%-7s", k))
+		dStr := descStyle.Render(d)
+		return fmt.Sprintf("%s %s", kStr, dStr)
+	}
+
+	col1Width := width / 2
+	
+	makeRow := func(k1, d1, k2, d2 string) string {
+		left := row(k1, d1)
+		right := row(k2, d2)
+		// Calculate spacing
+		gap := col1Width - lipgloss.Width(left)
+		if gap < 2 { gap = 2 }
+		return lipgloss.JoinHorizontal(lipgloss.Left, left, strings.Repeat(" ", gap), right)
+	}
+
+	title := lipgloss.NewStyle().Foreground(secondary).Bold(true).Render("HELP & SHORTCUTS")
+	desc := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render("AI-powered DynamoDB Explorer")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		desc,
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ GLOBAL ]"),
+		makeRow("/", "AI Query", "r", "Refresh"),
+		makeRow("q", "Back/Quit", "", ""),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ NAVIGATION ]"),
+		makeRow("k/↑", "Up", "j/↓", "Down"),
+		makeRow("ctrl+u", "Page Up", "ctrl+d", "Page Down"),
+		makeRow("Enter", "Select", "p", "Load More"),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ EDITING ]"),
+		makeRow("a", "Add New", "e", "Edit Item"),
+		makeRow("d", "Delete", "s", "Save Item"),
+	)
+
+	return detailStyle.Width(width).Render(content)
 }
 
 func (m model) renderTableItems() string {
