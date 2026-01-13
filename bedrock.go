@@ -97,8 +97,9 @@ SYSTEM CAPABILITIES (CRITICAL CONTEXT)
 This tool performs a "Fetch-then-Mutate" pattern.
 1. READ: It runs a SELECT query to find items.
 2. WRITE: It applies a *static* PartiQL template to every item found.
-It CANNOT generate unique values (like random strings, UUIDs, or timestamps) for each item client-side.
-Therefore, any request for "random", "unique", or "dynamic" values per item is IMPOSSIBLE and MUST be refused.
+3. INSERTs must be fully specified SQL statements (Mode: sql). You cannot use a Plan to generate new items.
+It CANNOT generate unique values client-side during a PLAN. However, for INSERT (Mode: sql), YOU (the AI) can and should generate the random/dummy data yourself.
+Therefore, any request for "random" or "unique" values in an UPDATE/DELETE plan is IMPOSSIBLE and MUST be refused.
 
 Return EXACTLY ONE valid JSON object and nothing else (no markdown, no backticks, no explanations).
 
@@ -126,10 +127,10 @@ OUTPUT JSON SCHEMA
       "projection": ["<PK name>", "<SK name>"] | ["*"]
     },
     "write": null | {
-      "action": "insert" | "update" | "delete",
+      "action": "update" | "delete",
       "per_item": {
         "partiql_template":
-          "<Key-bounded PartiQL with placeholders {{PK}} and {{SK}} if SK exists>"
+          "<Key-bounded PartiQL UPDATE/DELETE with placeholders {{PK}} and {{SK}} if SK exists>"
       }
     },
     "safety": {
@@ -172,7 +173,8 @@ NOTE: Inefficient queries (Full Table Scans) are ALLOWED. Do not refuse them.
 
 DECISION RULES
 - If mode="refusal", set other fields to null/empty.
-- CRITICAL: If the user asks for random/dynamic values (e.g. "set random password"), return mode="refusal". Do NOT attempt to use {{random}} placeholders.
+- For INSERT requests asking for random/dummy/sequential data, YOU (the AI) must generate the specific static values yourself and return them as a list of SQL statements in mode='sql'. Do NOT refuse. Do NOT use placeholders.
+- CRITICAL: If the user asks for random/dynamic values in an UPDATE/DELETE (e.g. "set random password"), return mode="refusal". Do NOT attempt to use {{random}} placeholders.
 - For INSERT operations (creating new items), ALWAYS use mode="sql" with fully specified statements. NEVER use a plan or templates for INSERT.
 - When mode='sql', statements MUST NOT contain ANY placeholders like {{...}}. You must generate actual values (random or specific).
 - If the request can be satisfied with a SAFE single-step key-bounded PartiQL,
@@ -186,9 +188,12 @@ PARTIQL RULES
 - Double quotes for table/attribute names.
 - Single quotes for string values.
 - INSERT: INSERT INTO "Table" VALUE {...}
+- UPDATE: UPDATE "Table" SET "attr" = 'val' OR UPDATE "Table" REMOVE "attr"
 - Missing attribute: "attr" IS MISSING
+- Check existence: attribute_exists("attr") NOT contains
+- Remove field: UPDATE "Table" REMOVE "attr" WHERE ...
 - partiql_template must ONLY contain {{PK}} and {{SK}} placeholders. Do NOT use placeholders like {{id}}, {{random}}, etc.
-- contains("attr",'x'), begins_with("attr",'A')
+- Check list/string content: contains("tags", 'urgent'), begins_with("attr",'A')
 
 Return ONLY the JSON object.
 `, schemaDesc, question)
@@ -206,7 +211,7 @@ Return ONLY the JSON object.
 			MaxNewTokens int     `json:"max_new_tokens"`
 			Temperature  float64 `json:"temperature"`
 		}{
-			MaxNewTokens: 1000, // Increased for larger batches of statements
+			MaxNewTokens: 5000, // Increased to 5000 (near max of 5,120 for Nova Lite)
 			Temperature:  0,
 		},
 	}

@@ -262,7 +262,7 @@ func (m model) renderTableList() string {
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(tree),
 	)
-	schemaBox := detailStyle.Width(rightWidth).Height(13).Render(details)
+	schemaBox := detailStyle.Width(rightWidth).Render(details)
 
 	// Help Box
 	helpBox := m.renderHelpBox(rightWidth)
@@ -319,6 +319,12 @@ func (m model) renderHelpBox(width int) string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ EDITING ]"),
 		makeRow("a", "Add New", "e", "Edit Item"),
 		makeRow("d", "Delete", "s", "Save Item"),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render("[ QUERY EXAMPLES ]"),
+		lipgloss.NewStyle().Foreground(textDim).Render(`• "Find items where status is 'active'"`),
+		lipgloss.NewStyle().Foreground(textDim).Render(`• "Update all items where age > 50, set status to 'retired'"`),
+		lipgloss.NewStyle().Foreground(textDim).Render(`• "Add a field 'category' with value 'new' to all items"`),
+		lipgloss.NewStyle().Foreground(textDim).Render(`• "Delete all items where expired is true"`),
 	)
 
 	return detailStyle.Width(width).Render(content)
