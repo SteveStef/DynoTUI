@@ -42,6 +42,7 @@ type Table struct {
 type Item map[string]interface{}
 
 type model struct {
+	aws         *AWS // Shared AWS client
 	view        currentView
 	width       int
 	height      int
@@ -72,7 +73,7 @@ type model struct {
 	AccountId string
 }
 
-func initialModel() model {
+func initialModel(api *AWS) model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(highlight)
@@ -90,6 +91,7 @@ func initialModel() model {
 	h.Styles.FullDesc.Foreground(lipgloss.Color("#626262"))
 
 	return model{
+		aws:           api,
 		view:          viewLoading,
 		loading:       true,
 		tables:        []Table{},
@@ -109,4 +111,3 @@ type Operation struct {
 	expression string
 	params     []types.AttributeValue
 }
-

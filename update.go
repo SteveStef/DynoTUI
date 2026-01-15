@@ -18,7 +18,7 @@ import (
 )
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, func() tea.Msg { return loadTables() })
+	return tea.Batch(m.spinner.Tick, func() tea.Msg { return loadTables(m.aws) })
 }
 
 func isLikelyScan(sql string, pk string) bool {
@@ -341,7 +341,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.view = viewLoading
 				m.statusMessage = "Saving item to DynamoDB..."
-				return m, saveItemCmd(m.tables[m.tableCursor].Name, m.items[m.itemCursor])
+				return m, saveItemCmd(m.aws, m.tables[m.tableCursor].Name, m.items[m.itemCursor])
 			case "n", "N", "esc":
 				m.view = viewTableItems
 				return m, nil
@@ -357,7 +357,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = viewLoading
 				m.statusMessage = "Deleting item from DynamoDB..."
 				t := m.tables[m.tableCursor]
-				return m, deleteItemCmd(t.Name, m.items[m.itemCursor], t.PK, t.SK)
+				return m, deleteItemCmd(m.aws, t.Name, m.items[m.itemCursor], t.PK, t.SK)
 			case "n", "N", "esc":
 				m.view = viewTableItems
 				return m, nil
@@ -397,24 +397,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							}
 							
 							if isMutation {
-								_, err := SqlQuery(ctx, op)
+								_, err := m.aws.SqlQuery(ctx, op)
 								if err != nil { return errMsg(err) }
-								scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
+								scanItems, nextKey, err := m.aws.ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
 								if err != nil { return errMsg(err) }
 								return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
 							}
 							
-							items, err := SqlQuery(ctx, op)
+							items, err := m.aws.SqlQuery(ctx, op)
 							if err != nil { return errMsg(err) }
 							return itemsLoadedMsg{items: items, isAppend: false}
 						}
 
 						// Batch
-						items, err := BatchSqlQuery(ctx, m.llmResult.Statements)
+						items, err := m.aws.BatchSqlQuery(ctx, m.llmResult.Statements)
 						if err != nil { return errMsg(err) }
 
 						if isMutation {
-							scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
+							scanItems, nextKey, err := m.aws.ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
 							if err != nil { return errMsg(err) }
 							return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
 						}
@@ -431,7 +431,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						readOp := Operation{
 							expression: m.llmResult.Plan.Read.Partiql,
 						}
-						items, err := SqlQuery(ctx, readOp)
+						items, err := m.aws.SqlQuery(ctx, readOp)
 						if err != nil { return errMsg(err) }
 
 						// If Select, we are done
@@ -505,13 +505,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					
 					// Chunking handled by BatchSqlQuery (aws.go) which now supports > 25 items by internal chunking.
-					_, err := BatchSqlQuery(ctx, queries)
+					_, err := m.aws.BatchSqlQuery(ctx, queries)
 					if err != nil {
 						return errMsg(err)
 					}
 					
 					// Re-scan
-					scanItems, nextKey, err := ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
+					scanItems, nextKey, err := m.aws.ScanTable(ctx, m.tables[m.tableCursor].Name, nil)
 					if err != nil { return errMsg(err) }
 					return itemsLoadedMsg{items: scanItems, nextKey: nextKey, isAppend: false}
 				}
@@ -546,7 +546,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.loading = true
 						m.view = viewLoading
 						m.statusMessage = "Generating SQL with Bedrock..."
-						return m, generateSQLCmd(question, m.tables[m.tableCursor])
+						return m, generateSQLCmd(m.aws, question, m.tables[m.tableCursor])
 					}
 				}
 			}
@@ -562,7 +562,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.view = viewLoading
 					m.statusMessage = fmt.Sprintf("Reloading full table %s...", m.tables[m.tableCursor].Name)
 					m.isCustomQuery = false
-					return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
+					return m, scanTable(m.aws, m.tables[m.tableCursor].Name, nil, false)
 				}
 				m.view = viewTableList
 				m.items = []Item{} // Clear items to save memory
@@ -648,7 +648,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.view = viewLoading
 					m.isCustomQuery = false
 					m.statusMessage = fmt.Sprintf("Scanning %s...", m.tables[m.tableCursor].Name)
-					return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
+					return m, scanTable(m.aws, m.tables[m.tableCursor].Name, nil, false)
 				}
 			} else if m.view == viewTableItems {
 				m.activePane = 1
@@ -663,7 +663,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Reset any "new" items tracking since we are reloading from source
 				m.newItems = make(map[int]bool)
 				m.modifiedItems = make(map[int]bool)
-				return m, scanTable(m.tables[m.tableCursor].Name, nil, false)
+				return m, scanTable(m.aws, m.tables[m.tableCursor].Name, nil, false)
 			}
 			
 		case "t", "T":
@@ -694,7 +694,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.loading = true
 					m.view = viewLoading
 					m.statusMessage = "Loading next page..."
-					return m, scanTable(m.tables[m.tableCursor].Name, m.lastEvaluatedKey, true)
+					return m, scanTable(m.aws, m.tables[m.tableCursor].Name, m.lastEvaluatedKey, true)
 				}
 				// Optional: Flash a message if no more pages
 			}

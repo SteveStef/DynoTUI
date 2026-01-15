@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -15,7 +16,14 @@ func main() {
 	}
 	defer f.Close()
 
-	m := initialModel()
+	ctx := context.TODO()
+	api, err := NewAWS(ctx)
+	if err != nil {
+		fmt.Printf("Failed to initialize AWS client: %v\n", err)
+		os.Exit(1)
+	}
+
+	m := initialModel(api)
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)

@@ -10,7 +10,6 @@ import (
 	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 )
 
@@ -73,15 +72,8 @@ type SafetyBlock struct {
 	Reason            string `json:"reason"`
 }
 
-func InvokeBedrock(ctx context.Context, question string, table Table) (LLMResult, error) {
+func (a *AWS) InvokeBedrock(ctx context.Context, question string, table Table) (LLMResult, error) {
 	log.Printf("InvokeBedrock called with question: '%s' for table: '%s'", question, table.Name)
-
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return LLMResult{}, fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := bedrockruntime.NewFromConfig(cfg)
 
 	// Construct schema description
 	schemaDesc := fmt.Sprintf("Table Name: %s\nPartition Key: %s (Type: %s)\nSort Key: %s (Type: %s)\n", 
@@ -149,6 +141,7 @@ CORRECT UPDATE: "partiql_template": "UPDATE \"Users\" SET \"status\"='active' WH
 
 REFUSAL EXAMPLES
 Request: "What is the average age of users?" -> {"mode": "refusal", "refusal_reason": "Aggregations like AVG are not supported."}
+Request: "Count how many items have status=active" -> {"mode": "refusal", "refusal_reason": "Aggregations like COUNT are not supported in PartiQL. Please ask to 'Find' items instead."}
 Request: "Update all users to have random passwords" -> {"mode": "refusal", "refusal_reason": "Dynamic value generation (random) is not supported for updates."}
 Request: "Double the points for everyone" -> {"mode": "refusal", "refusal_reason": "Math operations on attributes are not supported."}
 Request: "Set fullName to firstName + lastName" -> {"mode": "refusal", "refusal_reason": "String concatenation is not supported."}
@@ -221,7 +214,7 @@ Return ONLY the JSON object.
 		return LLMResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	resp, err := client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
+	resp, err := a.Bedrock.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String("amazon.nova-lite-v1:0"),
 		ContentType: aws.String("application/json"),
 		Body:        payload,
@@ -332,4 +325,3 @@ func SubstituteKeys(tpl string, pkVal any, skVal any, hasSK bool) (string, error
 	}
 	return out, nil
 }
-

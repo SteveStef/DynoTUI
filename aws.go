@@ -5,24 +5,47 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	// "time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-func SqlQuery(ctx context.Context, operation Operation) ([]map[string]interface{}, error) {
+type AWS struct {
+	Dynamo   *dynamodb.Client
+	Bedrock  *bedrockruntime.Client
+	Region   string
+	AccountID string
+}
+
+func NewAWS(ctx context.Context) (*AWS, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	client := dynamodb.NewFromConfig(cfg)
+	stsClient := sts.NewFromConfig(cfg)
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	var accountID string
+	if err == nil && identity.Account != nil {
+		accountID = *identity.Account
+	} else {
+		accountID = "unknown"
+	}
 
+	return &AWS{
+		Dynamo:    dynamodb.NewFromConfig(cfg),
+		Bedrock:   bedrockruntime.NewFromConfig(cfg),
+		Region:    cfg.Region,
+		AccountID: accountID,
+	}, nil
+}
+
+func (a *AWS) SqlQuery(ctx context.Context, operation Operation) ([]map[string]interface{}, error) {
 	input := &dynamodb.ExecuteStatementInput{
 		Statement: aws.String(operation.expression),
 	}
@@ -31,7 +54,7 @@ func SqlQuery(ctx context.Context, operation Operation) ([]map[string]interface{
 		input.Parameters = operation.params
 	}
 
-	result, err := client.ExecuteStatement(ctx, input)
+	result, err := a.Dynamo.ExecuteStatement(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("PartiQL execution failed: %w", err)
 	}
@@ -44,14 +67,7 @@ func SqlQuery(ctx context.Context, operation Operation) ([]map[string]interface{
 	return items, nil
 }
 
-func BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]interface{}, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
-	
+func (a *AWS) BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]interface{}, error) {
 	var allItems []map[string]interface{}
 	var errorMsgs []string
 
@@ -72,14 +88,11 @@ func BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]inter
 			})
 		}
 
-		result, err := client.BatchExecuteStatement(ctx, &dynamodb.BatchExecuteStatementInput{
+		result, err := a.Dynamo.BatchExecuteStatement(ctx, &dynamodb.BatchExecuteStatementInput{
 			Statements: batchInputs,
 		})
 
 		if err != nil {
-			// If the entire batch fails (e.g. auth error), record it and maybe stop?
-			// We'll record and continue to try other batches or stop? 
-			// Usually system errors mean we should stop.
 			return allItems, fmt.Errorf("batch execution failed at chunk %d-%d: %w", i, end, err)
 		}
 
@@ -111,21 +124,12 @@ func BatchSqlQuery(ctx context.Context, statements []string) ([]map[string]inter
 }
 
 // ListAllTables returns all DynamoDB table names in the configured account/region.
-func ListAllTables(ctx context.Context) ([]string, error) {
-	// Loads credentials from the standard AWS chain:
-	// env vars, shared config (~/.aws), ECS/EC2 role, etc.
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
-
+func (a *AWS) ListAllTables(ctx context.Context) ([]string, error) {
 	var out []string
 	var start *string
 
 	for {
-		resp, err := client.ListTables(ctx, &dynamodb.ListTablesInput{
+		resp, err := a.Dynamo.ListTables(ctx, &dynamodb.ListTablesInput{
 			ExclusiveStartTableName: start,
 			Limit:                  aws.Int32(100), // max is 100
 		})
@@ -157,47 +161,25 @@ type TableDetails struct {
 }
 
 // ListTablesWithDetails fetches names and then calls DescribeTable for each to get schema info.
-func ListTablesWithDetails(ctx context.Context) ([]TableDetails, string, string, error) {
-	names, err := ListAllTables(ctx)
+func (a *AWS) ListTablesWithDetails(ctx context.Context) ([]TableDetails, string, string, error) {
+	names, err := a.ListAllTables(ctx)
 	if err != nil {
 		return nil, "", "", err
 	}
-
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, "", "", err
-	}
-	
-	// Get Account ID via STS
-	stsClient := sts.NewFromConfig(cfg)
-	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-	var accountID string
-	if err == nil && identity.Account != nil {
-		accountID = *identity.Account
-	} else {
-		accountID = "unknown"
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
-	
-	resolvedRegion := cfg.Region
 
 	var tables []TableDetails
 	for _, name := range names {
-		resp, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		resp, err := a.Dynamo.DescribeTable(ctx, &dynamodb.DescribeTableInput{
 			TableName: aws.String(name),
 		})
 		if err != nil {
-			// Skip tables we can't describe or handle error? 
-			// For now, let's just log print and continue or return error. 
-			// Best to return error for TUI feedback.
-			return nil, resolvedRegion, accountID, fmt.Errorf("describe table %s: %w", name, err)
+			return nil, a.Region, a.AccountID, fmt.Errorf("describe table %s: %w", name, err)
 		}
 		
 		t := resp.Table
 		details := TableDetails{
 			Name:      *t.TableName,
-			Region:    resolvedRegion,
+			Region:    a.Region,
 			ItemCount: 0,
 			Status:    string(t.TableStatus),
 		}
@@ -232,8 +214,7 @@ func ListTablesWithDetails(ctx context.Context) ([]TableDetails, string, string,
 		}
 
 		// Get Real-Time Count (Scan with Count)
-		// valid for small dev tables; caution on large prod tables
-		scanOut, err := client.Scan(ctx, &dynamodb.ScanInput{
+		scanOut, err := a.Dynamo.Scan(ctx, &dynamodb.ScanInput{
 			TableName: aws.String(name),
 			Select:    types.SelectCount,
 		})
@@ -244,18 +225,12 @@ func ListTablesWithDetails(ctx context.Context) ([]TableDetails, string, string,
 		tables = append(tables, details)
 	}
 
-	return tables, resolvedRegion, accountID, nil
+	return tables, a.Region, a.AccountID, nil
 }
 
 // ScanTable fetches items from DynamoDB. It accepts an exclusiveStartKey for pagination.
 // It returns up to 1000 items and the LastEvaluatedKey for the next page.
-func ScanTable(ctx context.Context, tableName string, startKey map[string]types.AttributeValue) ([]map[string]interface{}, map[string]types.AttributeValue, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
+func (a *AWS) ScanTable(ctx context.Context, tableName string, startKey map[string]types.AttributeValue) ([]map[string]interface{}, map[string]types.AttributeValue, error) {
 	var items []map[string]interface{}
 	var lastKey map[string]types.AttributeValue = startKey
 
@@ -267,7 +242,7 @@ func ScanTable(ctx context.Context, tableName string, startKey map[string]types.
 			Limit:             aws.Int32(1000 - int32(len(items))), // Request only what we need to reach 1000
 		}
 
-		resp, err := client.Scan(ctx, input)
+		resp, err := a.Dynamo.Scan(ctx, input)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scan failed: %w", err)
 		}
@@ -291,21 +266,14 @@ func ScanTable(ctx context.Context, tableName string, startKey map[string]types.
 }
 
 // PutItem uploads an item to DynamoDB (Update/Insert)
-func PutItem(ctx context.Context, tableName string, item map[string]interface{}) error {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
-
+func (a *AWS) PutItem(ctx context.Context, tableName string, item map[string]interface{}) error {
 	// Marshal Go map to DynamoDB AttributeValue map
 	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		return fmt.Errorf("marshal item: %w", err)
 	}
 
-	_, err = client.PutItem(ctx, &dynamodb.PutItemInput{
+	_, err = a.Dynamo.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(tableName),
 		Item:      av,
 	})
@@ -317,21 +285,14 @@ func PutItem(ctx context.Context, tableName string, item map[string]interface{})
 }
 
 // DeleteItem deletes an item from DynamoDB
-func DeleteItem(ctx context.Context, tableName string, key map[string]interface{}) error {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
-
+func (a *AWS) DeleteItem(ctx context.Context, tableName string, key map[string]interface{}) error {
 	// Marshal Go map to DynamoDB AttributeValue map for key
 	av, err := attributevalue.MarshalMap(key)
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
 
-	_, err = client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+	_, err = a.Dynamo.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(tableName),
 		Key:       av,
 	})
@@ -341,5 +302,3 @@ func DeleteItem(ctx context.Context, tableName string, key map[string]interface{
 
 	return nil
 }
-
-
