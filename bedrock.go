@@ -40,6 +40,7 @@ type NovaResponse struct {
 
 type LLMResult struct {
 	Mode          string     `json:"mode"`
+	Reason        string     `json:"reason"`
 	Statements    []string   `json:"statements"`
 	Plan          *PlanBlock `json:"plan"`
 	RefusalReason string     `json:"refusal_reason"`
@@ -76,8 +77,12 @@ func (a *AWS) InvokeBedrock(ctx context.Context, question string, table Table) (
 	log.Printf("InvokeBedrock called with question: '%s' for table: '%s'", question, table.Name)
 
 	// Construct schema description
-	schemaDesc := fmt.Sprintf("Table Name: %s\nPartition Key: %s (Type: %s)\nSort Key: %s (Type: %s)\n", 
-		table.Name, table.PK, table.PKType, table.SK, table.SKType)
+	schemaDesc := fmt.Sprintf("Table Name: %s\nPartition Key: %s (Type: %s)\n", 
+		table.Name, table.PK, table.PKType)
+	
+	if table.SK != "" {
+		schemaDesc += fmt.Sprintf("Sort Key: %s (Type: %s)\n", table.SK, table.SKType)
+	}
 	
 	if len(table.GSIs) > 0 {
 		schemaDesc += fmt.Sprintf("Global Secondary Indexes: %v\n", table.GSIs)
@@ -86,7 +91,16 @@ func (a *AWS) InvokeBedrock(ctx context.Context, question string, table Table) (
 You are a DynamoDB expert. Your job is to produce a SAFE execution plan for DynamoDB.
 
 SYSTEM CAPABILITIES (CRITICAL CONTEXT)
-This tool performs a "Fetch-then-Mutate" pattern.
+This tool is a DynamoDB Manager. It supports:
+1. SQL MODE: Simple, efficient Single-Item Reads/Writes using PartiQL.
+2. PLAN MODE (READ): Complex Scans or Queries that return multiple items.
+3. PLAN MODE (WRITE): "Fetch-then-Mutate" operations for multi-item updates.
+
+CRITICAL RULES:
+- NEVER invent a write operation if the user did not ask for one.
+- If the user asks to "Get", "Find", or "Search", use a Read-Only operation (sql or plan with write: null).
+- Only use "Fetch-then-Mutate" (write block) if the user explicitly asks to UPDATE, DELETE, or MODIFY data.
+
 1. READ: It runs a SELECT query to find items.
 2. WRITE: It applies a *static* PartiQL template to every item found.
 3. INSERTs must be fully specified SQL statements (Mode: sql). You cannot use a Plan to generate new items.
@@ -106,6 +120,7 @@ User request:
 OUTPUT JSON SCHEMA
 {
   "mode": "sql" | "plan" | "refusal",
+  "reason": "Brief explanation of why this mode was chosen",
   "statements": ["<PartiQL>"],
   "refusal_reason": "<string if mode=refusal>",
 
@@ -136,15 +151,22 @@ EXAMPLES
 CORRECT INSERT: INSERT INTO "Users" VALUE {'id': 1, 'name': 'bob'}
 INCORRECT INSERT: INSERT INTO "Users" VALUE {'id': {{id}}, 'name': {{name}}}
 
+CORRECT SINGLE-ITEM UPDATE (SQL Mode):
+Request: "Update user 123 set status='active'" (assuming PK=id)
+Result: {"mode": "sql", "statements": ["UPDATE \"Users\" SET \"status\"='active' WHERE \"id\"=123"]}
+
 INCORRECT UPDATE (Wrong Placeholders): "partiql_template": "UPDATE \"Users\" SET \"status\"='active' WHERE \"id\"={{id}}"
-CORRECT UPDATE: "partiql_template": "UPDATE \"Users\" SET \"status\"='active' WHERE \"id\"={{PK}}"
+CORRECT UPDATE (Plan Mode): "partiql_template": "UPDATE \"Users\" SET \"status\"='active' WHERE \"id\"={{PK}}"
 
 REFUSAL EXAMPLES
 Request: "What is the average age of users?" -> {"mode": "refusal", "refusal_reason": "Aggregations like AVG are not supported."}
-Request: "Count how many items have status=active" -> {"mode": "refusal", "refusal_reason": "Aggregations like COUNT are not supported in PartiQL. Please ask to 'Find' items instead."}
+Request: "Join Users and Orders tables" -> {"mode": "refusal", "refusal_reason": "Joins/Unions involving multiple tables are not supported."}
 Request: "Update all users to have random passwords" -> {"mode": "refusal", "refusal_reason": "Dynamic value generation (random) is not supported for updates."}
-Request: "Double the points for everyone" -> {"mode": "refusal", "refusal_reason": "Math operations on attributes are not supported."}
+Request: "Double the points for everyone" -> {"mode": "refusal", "refusal_reason": "Math operations on attributes (points = points * 2) are not supported."}
 Request: "Set fullName to firstName + lastName" -> {"mode": "refusal", "refusal_reason": "String concatenation is not supported."}
+Request: "Uppercase all usernames" -> {"mode": "refusal", "refusal_reason": "String transformation functions like UPPER() or LOWER() are not supported."}
+Request: "Increase price by 10 for all items" -> {"mode": "refusal", "refusal_reason": "Mathematical updates (price = price + 10) are not supported in PartiQL."}
+Request: "Set updated_at to current time" -> {"mode": "refusal", "refusal_reason": "Built-in timestamp functions like NOW() are not supported."}
 
 STRICT DYNAMODB RULES
 - UPDATE and DELETE must uniquely identify items using the FULL primary key.
@@ -170,12 +192,8 @@ DECISION RULES
 - CRITICAL: If the user asks for random/dynamic values in an UPDATE/DELETE (e.g. "set random password"), return mode="refusal". Do NOT attempt to use {{random}} placeholders.
 - For INSERT operations (creating new items), ALWAYS use mode="sql" with fully specified statements. NEVER use a plan or templates for INSERT.
 - When mode='sql', statements MUST NOT contain ANY placeholders like {{...}}. You must generate actual values (random or specific).
-- If the request can be satisfied with a SAFE single-step key-bounded PartiQL,
-  return mode="sql" and populate "statements". Set "plan" to null.
-- Otherwise return mode="plan", set "statements" to [],
-  and produce a structured plan.
-- For read-only requests that require scanning, use operation="select" and set "write": null.
-- Only use operation="scan_then_write" when performing multi-item UPDATE or DELETE.
+- If the request is a SELECT, UPDATE, or DELETE that uniquely identifies a SINGLE item using the FULL Primary Key (PK for simple tables; BOTH PK and SK for composite tables), return mode="sql".
+- If a SELECT uses a partial key (e.g. only PK on a PK+SK table) or non-key attributes, it may return MULTIPLE items; return mode="plan" with operation="select".
 
 PARTIQL RULES
 - Double quotes for table/attribute names.

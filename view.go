@@ -386,7 +386,7 @@ func (m model) renderTableItems() string {
 	listHeader := itemHeaderStyle.Width(leftWidth-2).Render(colHeader)
 
 	// Windowing Logic
-	availableHeight := m.height - 15 
+	availableHeight := m.height - 11 
 	if availableHeight < 1 { availableHeight = 1 }
 	
 	start := 0
