@@ -79,3 +79,15 @@ The core feature of DynoTUI is the ability to write natural language queries.
 *   **Backend**: AWS SDK for Go v2.
 *   **AI**: Amazon Nova Lite via AWS Bedrock Runtime.
 
+## Limitations
+
+While DynoTUI's AI is powerful, it has several limitations based on DynamoDB's PartiQL capabilities and safety constraints:
+
+- **No Global Secondary Index (GSI) Query Support**: The application does not currently support querying via Global Secondary Indexes. All queries must target the base table's Primary Key or result in a scan.
+- **No Aggregations**: SQL functions like `COUNT`, `SUM`, `AVG`, `MIN`, or `MAX` are not supported by DynamoDB PartiQL.
+- **No Joins/Unions**: Operations involving multiple tables are not supported.
+- **Dynamic Value Generation**: The "Fetch-then-Mutate" engine cannot generate unique values (like UUIDs or timestamps) for each item during a bulk update.
+- **Complex Transformations**: Math operations (e.g., `SET price = price * 1.1`) or string manipulations (e.g., `UPPER(name)`) are not supported in PartiQL updates.
+- **Schema Management**: You cannot create, delete, or modify tables or indexes.
+
+
