@@ -292,12 +292,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+				// Prepare viewport
+				vpWidth := int(float64(m.width) * 0.7)
+				vpHeight := m.height - 14
+				if vpHeight < 5 { vpHeight = 5 } // Min height
+				
+				m.sqlViewport.Width = vpWidth
+				m.sqlViewport.Height = vpHeight
+				m.sqlViewport.SetContent(strings.Join(m.llmResult.Statements, "\n\n"))
 			} else if m.llmResult.Mode == "plan" {
 				if m.llmResult.Plan.Safety.NeedsConfirmation {
 					if m.llmResult.Plan.Safety.Reason == "full_table_scan" {
 						m.isScanWarning = true
 					}
 				}
+				// Prepare viewport for plan details
+				p := m.llmResult.Plan
+				bodyText := fmt.Sprintf("OPERATION: %s\n\n", strings.ToUpper(p.Operation))
+				bodyText += fmt.Sprintf("STEP 1 (READ):\n%s\n\n", p.Read.Partiql)
+				if p.Write != nil {
+					bodyText += fmt.Sprintf("STEP 2 (WRITE - Per Item):\n%s\n", p.Write.PerItem.PartiqlTemplate)
+				}
+				if p.Safety.NeedsConfirmation {
+					bodyText += fmt.Sprintf("\nNOTE: %s", p.Safety.Reason)
+				}
+				
+				vpWidth := int(float64(m.width) * 0.7)
+				vpHeight := m.height - 14
+				if vpHeight < 5 { vpHeight = 5 }
+
+				m.sqlViewport.Width = vpWidth
+				m.sqlViewport.Height = vpHeight
+				m.sqlViewport.SetContent(bodyText)
 			}
 			m.view = viewSqlConfirmation
 		}
@@ -368,6 +394,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.view == viewSqlConfirmation {
 			switch msg.String() {
+			case "up", "k":
+				m.sqlViewport.LineUp(1)
+				return m, nil
+			case "down", "j":
+				m.sqlViewport.LineDown(1)
+				return m, nil
+			case "ctrl+u":
+				m.sqlViewport.HalfViewUp()
+				return m, nil
+			case "ctrl+d":
+				m.sqlViewport.HalfViewDown()
+				return m, nil
 			case "y", "Y", "enter":
 				m.loading = true
 				m.view = viewLoading

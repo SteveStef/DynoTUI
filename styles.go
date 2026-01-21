@@ -109,7 +109,18 @@ var (
 )
 
 func init() {
-	SetTheme("Dark")
+	cfg, err := LoadConfig()
+	if err != nil {
+		// Fallback to default if load fails
+		SetTheme("Dark")
+	} else {
+		// Verify theme exists
+		if _, ok := Themes[cfg.Theme]; ok {
+			SetTheme(cfg.Theme)
+		} else {
+			SetTheme("Dark")
+		}
+	}
 }
 
 func SetTheme(name string) {
@@ -227,5 +238,9 @@ func NextTheme() string {
 		}
 	}
 	SetTheme(next)
+
+	// Save the new preference
+	_ = SaveConfig(Config{Theme: next})
+
 	return next
 }

@@ -57,28 +57,20 @@ func (m model) View() string {
 	case viewSqlConfirmation:
 		title := lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("Execute Generated SQL?")
 		
-		var bodyText string
-		if m.llmResult.Mode == "sql" {
-			bodyText = strings.Join(m.llmResult.Statements, "\n\n")
-		} else if m.llmResult.Mode == "plan" {
-			p := m.llmResult.Plan
-			bodyText = fmt.Sprintf("OPERATION: %s\n\n", strings.ToUpper(p.Operation))
-			bodyText += fmt.Sprintf("STEP 1 (READ):\n%s\n\n", p.Read.Partiql)
-			
-			if p.Write != nil {
-				bodyText += fmt.Sprintf("STEP 2 (WRITE - Per Item):\n%s\n", p.Write.PerItem.PartiqlTemplate)
-			}
-			
-			if p.Safety.NeedsConfirmation {
-				bodyText += fmt.Sprintf("\nNOTE: %s", p.Safety.Reason)
-			}
-		}
-
-		sqlText := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(m.width - 20).Render(bodyText)
-		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to execute, n/esc to cancel)")
+		// Viewport Frame
+		vpWidth := m.sqlViewport.Width
+		vpStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(subtle).
+			Padding(0, 1).
+			Width(vpWidth)
+		
+		sqlText := vpStyle.Render(m.sqlViewport.View())
+		
+		controls := lipgloss.NewStyle().Foreground(subtle).Render("(y/enter to execute, n/esc to cancel, j/k to scroll)")
 		
 		var contentComponents []string
-		contentComponents = append(contentComponents, title, "", sqlText, "")
+		contentComponents = append(contentComponents, title, sqlText)
 		
 		if m.isScanWarning {
 			scanWarn := lipgloss.NewStyle().Foreground(warning).Bold(true).Render("⚠ WARNING: This query may result in a FULL TABLE SCAN!")
@@ -87,8 +79,11 @@ func (m model) View() string {
 		
 		contentComponents = append(contentComponents, controls)
 
+		// Calculate dialog width based on viewport width (plus padding/borders)
+		dialogWidth := vpWidth + 6
+
 		content = lipgloss.Place(m.width, m.height-4, lipgloss.Center, lipgloss.Center,
-			dialogBoxStyle.Render(
+			dialogBoxStyle.Width(dialogWidth).Align(lipgloss.Center).Render(
 				lipgloss.JoinVertical(lipgloss.Center, contentComponents...),
 			),
 		)

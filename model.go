@@ -59,6 +59,7 @@ type model struct {
 	help        help.Model
 	keys        keyMap
 	viewport    viewport.Model
+	sqlViewport viewport.Model
 	activePane  int
 	statusMessage string
 	err         error
@@ -103,6 +104,7 @@ func initialModel(api *AWS) model {
 		help:          h,
 		keys:          keys,
 		viewport:      viewport.New(0, 0),
+		sqlViewport:   viewport.New(0, 0),
 		statusMessage: "Loading tables from AWS...",
 	}
 }
