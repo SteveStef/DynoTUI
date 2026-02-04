@@ -31,9 +31,9 @@ DynoTUI is a terminal-based user interface (TUI) for exploring and managing AWS 
 ## Installation & Running
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/stevestef/dynotui/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/SteveStef/DynoTUI/refs/heads/main/install.sh | bash
 or
-curl -sSL https://raw.githubusercontent.com/stevestef/dynotui/main/install.sh | zshrc
+curl -sSL https://raw.githubusercontent.com/SteveStef/DynoTUI/refs/heads/main/install.sh | zsh
 
 dynotui
 ```
